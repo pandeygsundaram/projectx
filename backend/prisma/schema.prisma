@@ -1,0 +1,80 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DIRECT_URL")
+}
+
+model User {
+  id        String    @id @default(uuid())
+  email     String    @unique
+  password  String
+  name      String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  projects  Project[]
+
+  @@map("users")
+}
+
+model Project {
+  id             String         @id @default(uuid())
+  userId         String         @map("user_id")
+  name           String?
+  status         String         @default("initializing") // 'initializing', 'building', 'ready', 'error', 'deleted', 'hibernated'
+  template       String         @default("vite-react")
+  podName        String?        @map("pod_name")
+  serviceName    String?        @map("service_name")
+  pvcName        String?        @map("pvc_name")
+  deploymentUrl  String?        @map("deployment_url")
+  deployedAt     DateTime?      @map("deployed_at")
+  buildStatus    String?        @map("build_status") // 'pending', 'building', 'success', 'failed'
+  createdAt      DateTime       @default(now()) @map("created_at")
+  lastActivityAt DateTime       @default(now()) @map("last_activity_at")
+  deletedAt      DateTime?      @map("deleted_at")
+  user           User           @relation(fields: [userId], references: [id])
+  conversations  Conversation[]
+  snapshots      Snapshot[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([lastActivityAt])
+  @@map("projects")
+}
+
+model Conversation {
+  id        String   @id @default(uuid())
+  projectId String   @map("project_id")
+  role      String // 'user' or 'assistant'
+  content   String   @db.Text
+  toolCalls Json?    @map("tool_calls") // Array of tool calls made by Claude
+  fileDiffs Json?    @map("file_diffs") // Array of file changes: [{ path, action, content }]
+  createdAt DateTime @default(now()) @map("created_at")
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([createdAt])
+  @@map("conversations")
+}
+
+model Snapshot {
+  id           String   @id @default(uuid())
+  projectId    String   @map("project_id")
+  s3Key        String   @map("s3_key")
+  snapshotType String?  @map("snapshot_type") // 'full', 'patch'
+  sizeBytes    BigInt?  @map("size_bytes")
+  createdAt    DateTime @default(now()) @map("created_at")
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("snapshots")
+}
