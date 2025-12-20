@@ -19,7 +19,7 @@ const execApi = new k8s.Exec(kc);
 
 const NAMESPACE = 'default';
 const PREVIEW_DOMAIN = 'projects.samosa.wtf';
-const DEFAULT_TEMPLATE_REPO = 'https://github.com/pandeygsundaram/react-templete';
+const DEFAULT_TEMPLATE_REPO = 'https://github.com/neekunjchaturvedi/game-template'; // Game template with React + Three.js
 const PROJECT_DIR = '/app'; // Directory inside pod where code is cloned
 
 // K8s names must start with letter, so prefix project IDs
@@ -373,6 +373,32 @@ export async function readProjectFile(projectId: string, filePath: string): Prom
     console.error(`Failed to read file ${filePath}:`, error.message);
     throw new Error(`Failed to read file: ${error.message}`);
   }
+}
+
+/**
+ * Write content to a file in the pod
+ */
+export async function writeProjectFile(projectId: string, filePath: string, content: string): Promise<void> {
+  try {
+    const fullPath = `${PROJECT_DIR}/${filePath}`;
+    // Create parent directory if needed
+    const dirPath = fullPath.substring(0, fullPath.lastIndexOf('/'));
+    await execCommandInPod(projectId, ['mkdir', '-p', dirPath]);
+
+    // Write file using cat with heredoc
+    const escapedContent = content.replace(/'/g, "'\\''");
+    await execCommandInPod(projectId, ['sh', '-c', `cat > '${fullPath}' << 'EOF'\n${escapedContent}\nEOF`]);
+  } catch (error: any) {
+    console.error(`Failed to write file ${filePath}:`, error.message);
+    throw new Error(`Failed to write file: ${error.message}`);
+  }
+}
+
+/**
+ * Execute a command in the pod (exported for agent tools)
+ */
+export async function executeInPod(projectId: string, command: string): Promise<string> {
+  return execCommandInPod(projectId, ['sh', '-c', command]);
 }
 
 // ========== DEPLOYMENT OPERATIONS ==========

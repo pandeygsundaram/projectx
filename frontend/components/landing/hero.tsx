@@ -62,7 +62,7 @@ export const HeroSection = () => {
               <div className="w-3 h-3 rounded-full bg-green-500/20 border border-green-500/50"></div>
             </div>
             <div className="text-xs font-mono text-muted-foreground">
-              dotpad-engine — preview
+              hitbox-engine — preview
             </div>
             <div className="w-16"></div>
           </div>

@@ -14,7 +14,7 @@ export const Navbar = () => {
             <Gamepad2 className="h-5 w-5 text-primary" />
           </div>
           <span className="text-lg font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-foreground to-foreground/70">
-            dotpad
+            HitBox
           </span>
         </Link>
 

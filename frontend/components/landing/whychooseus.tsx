@@ -3,7 +3,7 @@ export const WhyChooseUs = () => {
     <section className="py-24 bg-black/20">
       <div className="container mx-auto px-6">
         <h2 className="text-3xl md:text-4xl font-bold mb-12 text-center">
-          Why top developers choose Dotpad
+          Why top developers choose HitBox
         </h2>
 
         <div className="grid grid-cols-1 md:grid-cols-3 md:grid-rows-2 gap-6 h-auto md:h-[600px]">

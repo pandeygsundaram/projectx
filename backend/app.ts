@@ -4,6 +4,7 @@ import morgan from 'morgan';
 import dotenv from 'dotenv';
 import authRoutes from './routes/auth.routes';
 import projectRoutes from './routes/project.routes';
+import chatRoutes from './routes/chat.routes';
 
 dotenv.config();
 
@@ -23,5 +24,6 @@ app.get('/health', (req, res) => {
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/projects', projectRoutes);
+app.use('/api/chat', chatRoutes);
 
 export default app;

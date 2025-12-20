@@ -24,7 +24,7 @@ const r2Client = new S3Client({
   forcePathStyle: true,
 });
 
-const BUCKET_NAME = process.env.R2_BUCKET_NAME || 'apna-loveable-storage';
+const BUCKET_NAME = process.env.R2_BUCKET_NAME || 'hitbox-storage';
 const R2_FOLDER = 'project-snapshots'; // Folder inside the bucket
 
 export interface UploadResult {

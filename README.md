@@ -1,6 +1,6 @@
-# Apna Loveable - AI-Powered Code Generation Platform
+# HitBox - AI-Powered Code Generation Platform
 
-A Loveable-inspired platform that enables users to generate and iterate on React applications using natural language, powered by Claude AI and Kubernetes.
+A platform that enables users to generate and iterate on React applications using natural language, powered by Claude AI and Kubernetes.
 
 ## Table of Contents
 
@@ -61,7 +61,7 @@ A Loveable-inspired platform that enables users to generate and iterate on React
            │                   │  │  - Vite Dev Server    │  │
            │  Caddy Routing    │  │  - Port 5173          │  │
            │  *.project        │  │                        │  │
-           │  .apnaloveable    │  │  PVC: /app            │  │
+           │  .hitbox    │  │  PVC: /app            │  │
            │  .com             │  │  (1 hour TTL)         │  │
            │                   │  └────────────────────────┘  │
            │                   │                              │
@@ -77,7 +77,7 @@ A Loveable-inspired platform that enables users to generate and iterate on React
                                     │   Preview Link    │
                                     │ project-abc123    │
                                     │ .project          │
-                                    │ .apnaloveable.com │
+                                    │ .hitbox.com │
                                     └───────────────────┘
 ```
 
@@ -136,7 +136,7 @@ A Loveable-inspired platform that enables users to generate and iterate on React
 - SSL/TLS termination
 - Load balancing
 
-**Pattern**: `{project-id}.project.apnaloveable.com` → `Service/project-{id}:5173`
+**Pattern**: `{project-id}.project.hitbox.com` → `Service/project-{id}:5173`
 
 ### 6. Claude AI (Anthropic)
 
@@ -174,7 +174,7 @@ A Loveable-inspired platform that enables users to generate and iterate on React
 {
   "projectId": "proj-abc123",
   "status": "building",
-  "previewUrl": "https://proj-abc123.project.apnaloveable.com",
+  "previewUrl": "https://proj-abc123.project.hitbox.com",
   "message": "Project is being created..."
 }
 ```
@@ -239,7 +239,7 @@ async function createProject(req, res) {
   return res.json({
     projectId: projectId,
     status: result.success ? 'ready' : 'error',
-    previewUrl: `https://${podName}.project.apnaloveable.com`,
+    previewUrl: `https://${podName}.project.hitbox.com`,
     message: result.message,
     errors: result.errors || []
   });
@@ -346,7 +346,7 @@ async function chatWithProject(req, res) {
   "id": "proj-abc123",
   "userId": "user-123",
   "status": "ready",
-  "previewUrl": "https://proj-abc123.project.apnaloveable.com",
+  "previewUrl": "https://proj-abc123.project.hitbox.com",
   "createdAt": "2025-01-15T10:30:00Z",
   "lastActivityAt": "2025-01-15T11:45:00Z",
   "podStatus": "running"
@@ -373,7 +373,7 @@ async function getProject(req, res) {
 
   return res.json({
     ...project,
-    previewUrl: `https://${podName}.project.apnaloveable.com`,
+    previewUrl: `https://${podName}.project.hitbox.com`,
     podStatus: podStatus || 'terminated'
   });
 }
@@ -622,7 +622,7 @@ metadata:
   labels:
     app: project
     project-id: {PROJECT_ID}
-    managed-by: apna-loveable
+    managed-by: hitbox
 spec:
   containers:
   - name: vite-dev
@@ -1261,14 +1261,14 @@ The Vite dev server is already running on port 5173.`;
 # Caddyfile
 
 # Main API server
-api.apnaloveable.com {
+api.hitbox.com {
     reverse_proxy localhost:3000
 }
 
 # Dynamic project routing
-*.project.apnaloveable.com {
+*.project.hitbox.com {
     @project {
-        header_regexp host Host ^(.+)\.project\.apnaloveable\.com$
+        header_regexp host Host ^(.+)\.project\.hitbox\.com$
     }
 
     reverse_proxy @project {
@@ -1299,7 +1299,7 @@ api.apnaloveable.com {
 Since we're using Kubernetes Services with predictable names (`project-{id}`), Caddy can route directly to them using Kubernetes DNS:
 
 ```
-Subdomain: proj-abc123.project.apnaloveable.com
+Subdomain: proj-abc123.project.hitbox.com
     ↓
 Extract: proj-abc123
     ↓
@@ -1316,7 +1316,7 @@ If you need more dynamic control:
 async function registerProjectRoute(projectId) {
   const caddyApiUrl = 'http://caddy-admin:2019';
   const serviceName = `project-${projectId}`;
-  const subdomain = `${serviceName}.project.apnaloveable.com`;
+  const subdomain = `${serviceName}.project.hitbox.com`;
 
   const route = {
     "@id": serviceName,
@@ -1517,7 +1517,7 @@ async function removeProjectRoute(projectId) {
 ## S3/R2 Storage Structure
 
 ```
-bucket: apna-loveable-projects
+bucket: hitbox-projects
 
 Structure:
 /snapshots/
@@ -1568,7 +1568,7 @@ async function saveSnapshotToS3(projectId, podName) {
 
   // 3. Upload to S3
   await s3.putObject({
-    Bucket: 'apna-loveable-projects',
+    Bucket: 'hitbox-projects',
     Key: s3Key,
     Body: tarContent,
     ContentType: 'application/gzip',
@@ -1580,7 +1580,7 @@ async function saveSnapshotToS3(projectId, podName) {
 
   // 4. Update 'latest' reference
   await s3.putObject({
-    Bucket: 'apna-loveable-projects',
+    Bucket: 'hitbox-projects',
     Key: `snapshots/${projectId}/latest.tar.gz`,
     Body: tarContent,
     ContentType: 'application/gzip'
@@ -1602,7 +1602,7 @@ async function restoreProjectFromS3(projectId) {
 
   // 1. Download from S3
   const s3Object = await s3.getObject({
-    Bucket: 'apna-loveable-projects',
+    Bucket: 'hitbox-projects',
     Key: s3Key
   }).promise();
 
@@ -1651,7 +1651,7 @@ async function restoreProjectFromS3(projectId) {
 
 2. **Object Storage**
    - S3 (AWS) or R2 (Cloudflare)
-   - Bucket created: `apna-loveable-projects`
+   - Bucket created: `hitbox-projects`
    - Access keys configured
 
 3. **PostgreSQL Database**
@@ -1660,7 +1660,7 @@ async function restoreProjectFromS3(projectId) {
 
 4. **Caddy Server**
    - Installed on edge/load balancer
-   - DNS configured: `*.project.apnaloveable.com` → Caddy IP
+   - DNS configured: `*.project.hitbox.com` → Caddy IP
 
 5. **Anthropic API Key**
    - Sign up at https://console.anthropic.com
@@ -1706,8 +1706,8 @@ docker push your-registry/vite-node22:latest
 
 ```bash
 # Clone repository
-git clone https://github.com/your-org/apna-loveable.git
-cd apna-loveable
+git clone https://github.com/your-org/hitbox.git
+cd hitbox
 
 # Install dependencies
 npm install
@@ -1766,15 +1766,15 @@ sudo systemctl reload caddy
 Point your domain to Caddy server:
 
 ```
-A     api.apnaloveable.com        →  <caddy-server-ip>
-A     *.project.apnaloveable.com  →  <caddy-server-ip>
+A     api.hitbox.com        →  <caddy-server-ip>
+A     *.project.hitbox.com  →  <caddy-server-ip>
 ```
 
 ### Step 6: Test the System
 
 ```bash
 # Create a test project
-curl -X POST https://api.apnaloveable.com/api/projects/create \
+curl -X POST https://api.hitbox.com/api/projects/create \
   -H "Content-Type: application/json" \
   -d '{
     "prompt": "Create a simple hello world app",
@@ -1785,7 +1785,7 @@ curl -X POST https://api.apnaloveable.com/api/projects/create \
 # {
 #   "projectId": "proj-abc123",
 #   "status": "ready",
-#   "previewUrl": "https://proj-abc123.project.apnaloveable.com"
+#   "previewUrl": "https://proj-abc123.project.hitbox.com"
 # }
 
 # Visit preview URL in browser
@@ -1855,7 +1855,7 @@ PORT=3000
 NODE_ENV=production
 
 # Database
-DATABASE_URL=postgresql://user:password@localhost:5432/apna_loveable
+DATABASE_URL=postgresql://user:password@localhost:5432/hitbox
 
 # Anthropic
 ANTHROPIC_API_KEY=sk-ant-...
@@ -1864,17 +1864,17 @@ ANTHROPIC_API_KEY=sk-ant-...
 S3_ENDPOINT=https://your-account.r2.cloudflarestorage.com
 S3_ACCESS_KEY=your-access-key
 S3_SECRET_KEY=your-secret-key
-S3_BUCKET=apna-loveable-projects
+S3_BUCKET=hitbox-projects
 
 # Kubernetes
 KUBE_CONFIG_PATH=/path/to/kubeconfig  # optional, uses default if not set
-KUBE_NAMESPACE=apna-loveable
+KUBE_NAMESPACE=hitbox
 
 # Container Registry
 CONTAINER_IMAGE=your-registry/vite-node22:latest
 
 # Caddy
-CADDY_DOMAIN=project.apnaloveable.com
+CADDY_DOMAIN=project.hitbox.com
 
 # Cleanup
 CLEANUP_INTERVAL_MINUTES=10
@@ -1946,7 +1946,7 @@ curl https://api.anthropic.com/v1/messages \
 
 ```bash
 # Test S3 credentials
-aws s3 ls s3://apna-loveable-projects --endpoint-url $S3_ENDPOINT
+aws s3 ls s3://hitbox-projects --endpoint-url $S3_ENDPOINT
 ```
 
 ---
@@ -1962,5 +1962,5 @@ Contributions welcome! Please open an issue or PR.
 ## Support
 
 For questions or issues:
-- GitHub Issues: https://github.com/your-org/apna-loveable/issues
-- Email: support@apnaloveable.com
+- GitHub Issues: https://github.com/your-org/hitbox/issues
+- Email: support@hitbox.com

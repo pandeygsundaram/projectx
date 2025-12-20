@@ -12,7 +12,7 @@ export const Footer = () => {
               <div className="bg-primary/20 p-1.5 rounded-lg">
                 <Gamepad2 className="h-5 w-5 text-primary" />
               </div>
-              <span className="text-xl font-bold">dotpad</span>
+              <span className="text-xl font-bold">HitBox</span>
             </Link>
             <p className="text-muted-foreground text-sm mb-6 max-w-xs">
               The AI-native game engine for the web. Build, ship, and monetize
@@ -124,7 +124,7 @@ export const Footer = () => {
 
         <div className="border-t border-white/10 pt-8 flex flex-col md:flex-row items-center justify-between gap-4">
           <p className="text-xs text-muted-foreground">
-            © 2024 Dotpad Inc. All rights reserved.
+            © 2024 HitBox Inc. All rights reserved.
           </p>
           <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-secondary/50 border border-white/5">
             <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>

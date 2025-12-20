@@ -1,4 +1,4 @@
-# Apna Loveable - Frontend
+# HitBox - Frontend
 
 A modern Next.js 15 frontend for building AI-powered web applications with live preview.
 

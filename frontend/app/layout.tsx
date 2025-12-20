@@ -4,7 +4,7 @@ import { ThemeProvider } from "@/components/providers/theme-provider";
 import { Toaster } from "sonner";
 
 export const metadata: Metadata = {
-  title: "Apna Loveable - Build with AI",
+  title: "HitBox - Build with AI",
   description: "Build modern web applications with AI assistance",
 };
 
@@ -16,7 +16,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className="antialiased">
-        <ThemeProvider defaultTheme="dark" storageKey="apna-loveable-theme">
+        <ThemeProvider defaultTheme="dark" storageKey="hitbox-theme">
           {children}
           <Toaster position="top-right" richColors />
         </ThemeProvider>

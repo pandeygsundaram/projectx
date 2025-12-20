@@ -29,7 +29,7 @@ const tiers = [
       "1,000 AI asset generations / mo",
       "Priority build queue",
       "Global Edge Hosting (Multi-region)",
-      'Remove "Built with Dotpad" badge',
+      'Remove "Built with HitBox" badge',
       "Smart NPC Brains (GPT-4o)",
     ],
     cta: "Go Pro",
