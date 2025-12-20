@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: caddyfile
+data:
+  Caddyfile: |
+    {
+      email thisnewcomputerismine2020@gmail.com
+    }
+
+    https://*.projects.samosa.wtf {
+      tls {
+        dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+      }
+      reverse_proxy {http.request.host.labels.3}:80
+    }
+
+    http://*.projects.samosa.wtf {
+      redir https://{host}{uri} permanent
+    }
+
+    https://k8.samosa.wtf {
+      respond "🚀 K8s Gateway UP! Use: yourproject.projects.samosa.wtf" 200
+    }
+
+    http://k8.samosa.wtf {
+      redir https://{host}{uri} permanent
+    }
