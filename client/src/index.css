@@ -1,0 +1,145 @@
+@import "tailwindcss";
+
+/* Theme Configuration */
+@theme {
+  /* Color Palette */
+  --color-border: oklch(0.92 0.01 240);
+  --color-input: oklch(0.92 0.01 240);
+  --color-ring: oklch(0.65 0.25 290);
+  --color-background: oklch(0.98 0.01 240);
+  --color-foreground: oklch(0.2 0.02 240);
+
+  --color-primary: oklch(0.65 0.25 290); /* Vivid Violet */
+  --color-primary-foreground: oklch(0.98 0.01 240);
+
+  --color-secondary: oklch(0.96 0.01 240);
+  --color-secondary-foreground: oklch(0.2 0.02 240);
+
+  --color-muted: oklch(0.96 0.01 240);
+  --color-muted-foreground: oklch(0.55 0.02 240);
+
+  --color-accent: oklch(0.65 0.25 290);
+  --color-accent-foreground: oklch(0.2 0.02 240);
+
+  --color-destructive: oklch(0.65 0.23 25);
+  --color-destructive-foreground: oklch(0.98 0.01 240);
+
+  --color-card: oklch(1 0 0);
+  --color-card-foreground: oklch(0.2 0.02 240);
+
+  --color-popover: oklch(1 0 0);
+  --color-popover-foreground: oklch(0.2 0.02 240);
+
+  /* Border Radius */
+  --radius-lg: 0.5rem;
+  --radius-md: calc(0.5rem - 2px);
+  --radius-sm: calc(0.5rem - 4px);
+
+  /* Font Families */
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* Container */
+  --container-center: true;
+  --container-padding: 2rem;
+  --breakpoint-2xl: 1400px;
+}
+
+/* Dark Mode Theme */
+@media (prefers-color-scheme: dark) {
+  @theme {
+    /* QuestFlow Style - Deep Void Black & Neon Accents */
+    --color-background: oklch(0.15 0.02 240); /* Very dark blue-black */
+    --color-foreground: oklch(0.98 0.01 240);
+
+    --color-card: oklch(0.18 0.02 240); /* Slightly lighter for depth */
+    --color-card-foreground: oklch(0.98 0.01 240);
+
+    --color-popover: oklch(0.15 0.02 240);
+    --color-popover-foreground: oklch(0.98 0.01 240);
+
+    --color-primary: oklch(0.58 0.22 290); /* Deep Electric Purple */
+    --color-primary-foreground: oklch(0.98 0.01 240);
+
+    --color-secondary: oklch(0.25 0.02 240);
+    --color-secondary-foreground: oklch(0.98 0.01 240);
+
+    --color-muted: oklch(0.25 0.02 240);
+    --color-muted-foreground: oklch(0.65 0.01 240);
+
+    --color-accent: oklch(0.25 0.02 240);
+    --color-accent-foreground: oklch(0.98 0.01 240);
+
+    --color-destructive: oklch(0.45 0.18 25);
+    --color-destructive-foreground: oklch(0.98 0.01 240);
+
+    --color-border: oklch(0.25 0.02 240);
+    --color-input: oklch(0.25 0.02 240);
+    --color-ring: oklch(0.58 0.22 290);
+  }
+}
+
+/* Base Styles */
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    transition: background-color 300ms, color 300ms;
+  }
+
+  /* Custom Scrollbar for that Cyber feel */
+  ::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background-color: var(--color-background);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background-color: color-mix(
+      in oklch,
+      var(--color-primary) 30%,
+      transparent
+    );
+    border-radius: 9999px;
+  }
+}
+
+/* Utility Classes */
+@layer utilities {
+  /* Cyberpunk Grid Background */
+  .bg-grid {
+    background-size: 40px 40px;
+    background-image: linear-gradient(
+        to right,
+        color-mix(in oklch, var(--color-primary) 5%, transparent) 1px,
+        transparent 1px
+      ),
+      linear-gradient(
+        to bottom,
+        color-mix(in oklch, var(--color-primary) 5%, transparent) 1px,
+        transparent 1px
+      );
+  }
+
+  /* Glassmorphism Effect */
+  .glass {
+    background: color-mix(in oklch, var(--color-card) 70%, transparent);
+    backdrop-filter: blur(12px);
+    border: 1px solid color-mix(in oklch, var(--color-border) 50%, transparent);
+  }
+
+  /* Neon Glow */
+  .glow {
+    box-shadow: 0 0 20px
+      color-mix(in oklch, var(--color-primary) 40%, transparent);
+  }
+}
