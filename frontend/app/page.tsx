@@ -1,9 +1,9 @@
-import { Features } from "@/components/home(401)/features";
-import { Footer } from "@/components/home(401)/footer";
-import { HeroSection } from "@/components/home(401)/hero";
-import { Navbar } from "@/components/home(401)/navbar";
-import { Pricing } from "@/components/home(401)/pricing";
-import { WhyChooseUs } from "@/components/home(401)/whychooseus";
+import { Features } from "@/components/landing/features";
+import { Footer } from "@/components/landing/footer";
+import { HeroSection } from "@/components/landing/hero";
+import { Navbar } from "@/components/landing/navbar";
+import { Pricing } from "@/components/landing/pricing";
+import { WhyChooseUs } from "@/components/landing/whychooseus";
 import React from "react";
 
 export default function LandingPage() {
