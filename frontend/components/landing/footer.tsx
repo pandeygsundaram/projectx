@@ -1,5 +1,5 @@
 import { Gamepad2, Github, Twitter, Disc } from "lucide-react";
-import { Link } from "react-router-dom";
+import Link from "next/link";
 
 export const Footer = () => {
   return (
@@ -8,7 +8,7 @@ export const Footer = () => {
         <div className="grid grid-cols-2 md:grid-cols-5 gap-10 mb-16">
           {/* Brand Column */}
           <div className="col-span-2">
-            <Link to="/" className="flex items-center gap-2 mb-6">
+            <Link href="/" className="flex items-center gap-2 mb-6">
               <div className="bg-primary/20 p-1.5 rounded-lg">
                 <Gamepad2 className="h-5 w-5 text-primary" />
               </div>

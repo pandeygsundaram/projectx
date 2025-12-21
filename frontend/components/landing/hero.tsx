@@ -1,5 +1,4 @@
-import { Link } from "react-router-dom";
-
+import Link from "next/link";
 import { Zap, Code2, Box, ArrowRight } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -37,7 +36,7 @@ export const HeroSection = () => {
 
         {/* CTA Buttons */}
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-20">
-          <Link to="/signup" className="w-full sm:w-auto">
+          <Link href="/signup" className="w-full sm:w-auto">
             <Button
               size="lg"
               className="h-14 px-8 text-lg w-full shadow-[0_0_30px_rgba(139,92,246,0.3)] hover:shadow-[0_0_50px_rgba(139,92,246,0.5)] transition-all duration-300"

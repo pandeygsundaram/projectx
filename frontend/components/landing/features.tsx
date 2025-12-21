@@ -1,3 +1,5 @@
+"use client";
+
 import React, { useRef, useState } from "react";
 import {
   Terminal,
@@ -125,12 +127,12 @@ const features = [
 
 // --- Components ---
 
-const SpotlightCard = ({ children, className = "", noSpotlight = false }) => {
-  const divRef = useRef(null);
+const SpotlightCard = ({ children, className = "", noSpotlight = false }: { children: React.ReactNode; className?: string; noSpotlight?: boolean }) => {
+  const divRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [opacity, setOpacity] = useState(0);
 
-  const handleMouseMove = (e) => {
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!divRef.current || noSpotlight) return;
     const rect = divRef.current.getBoundingClientRect();
     setPosition({ x: e.clientX - rect.left, y: e.clientY - rect.top });

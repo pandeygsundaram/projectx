@@ -1,15 +1,15 @@
 import React from "react";
-import { Link } from "react-router-dom";
+import Link from "next/link";
 import { Gamepad2, Sun, Moon, Menu } from "lucide-react";
 import { Button } from "../ui/button";
-import { ModeToggle } from "../common/mode-toggle";
+import { ThemeToggle } from "../ui/theme-toggle";
 
 export const Navbar = () => {
   return (
     <nav className="fixed top-0 w-full z-50 border-b border-white/5 bg-background/60 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60">
       <div className="container mx-auto px-6 h-16 flex items-center justify-between">
         {/* Logo */}
-        <Link to="/" className="flex items-center gap-2 group">
+        <Link href="/" className="flex items-center gap-2 group">
           <div className="bg-primary/10 p-2 rounded-lg border border-primary/20 group-hover:border-primary/50 group-hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] transition-all duration-300">
             <Gamepad2 className="h-5 w-5 text-primary" />
           </div>
@@ -35,7 +35,7 @@ export const Navbar = () => {
         <div className="flex items-center gap-3">
           {/* <ModeToggle /> */}
           <div className="hidden md:flex gap-3">
-            <Link to="/login">
+            <Link href="/login">
               <Button
                 variant="ghost"
                 className="text-muted-foreground hover:text-foreground"
@@ -43,7 +43,7 @@ export const Navbar = () => {
                 Log in
               </Button>
             </Link>
-            <Link to="/signup">
+            <Link href="/signup">
               <Button className="shadow-[0_0_20px_rgba(139,92,246,0.2)]">
                 Get Access
               </Button>

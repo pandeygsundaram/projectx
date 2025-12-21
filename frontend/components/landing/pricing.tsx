@@ -1,3 +1,5 @@
+"use client";
+
 import React, { useState } from "react";
 import { Check, Zap, HelpCircle } from "lucide-react";
 import { Button } from "../ui/button";
