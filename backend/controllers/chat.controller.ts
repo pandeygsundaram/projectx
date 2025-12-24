@@ -3,26 +3,30 @@ import { query, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { createProjectTools } from '../utils/agentTools';
 import { getPodLogs } from '../services/kubernetes';
 import prisma from '../config/database';
+import { chatWithGemini } from '../services/gemini-chat';
+import { ClaudeMultiAgentOrchestrator } from '../services/claude/multi-agent-orchestrator';
 
 interface ChatRequest {
   projectId: string;
   message: string;
   gameType?: '2d' | '3d'; // Optional game type hint
+  provider?: 'claude' | 'gemini'; // AI provider selection
+  multiAgent?: boolean; // Enable multi-agent mode for Claude
 }
 
 // Store session IDs for conversation continuity
 const sessionStore = new Map<string, string>();
 
-export async function chatWithProject(req: Request, res: Response) {
+export async function getProjectConversations(req: Request, res: Response) {
   try {
-    const { projectId, message, gameType = '3d' } = req.body as ChatRequest;
+    const { projectId } = req.params;
+    const userId = (req as any).userId;
 
-    if (!projectId || !message) {
-      return res.status(400).json({ error: 'Project ID and message are required' });
-    }
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('📚 [CONVERSATIONS] Fetching conversations for project:', projectId);
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
     // Verify project exists and belongs to user
-    const userId = (req as any).userId;
     const project = await prisma.project.findFirst({
       where: {
         id: projectId,
@@ -31,55 +35,301 @@ export async function chatWithProject(req: Request, res: Response) {
     });
 
     if (!project) {
+      console.log('❌ [CONVERSATIONS] Project not found');
       return res.status(404).json({ error: 'Project not found' });
     }
 
+    // Fetch conversations ordered by creation time
+    const conversations = await prisma.conversation.findMany({
+      where: {
+        projectId,
+      },
+      orderBy: {
+        createdAt: 'asc',
+      },
+      select: {
+        id: true,
+        role: true,
+        content: true,
+        toolCalls: true,
+        fileDiffs: true,
+        createdAt: true,
+      },
+    });
+
+    console.log(`✅ [CONVERSATIONS] Found ${conversations.length} messages`);
+
+    res.json({
+      conversations: conversations.map(conv => ({
+        id: conv.id,
+        role: conv.role,
+        content: conv.content,
+        timestamp: conv.createdAt.toISOString(),
+        toolCalls: conv.toolCalls,
+        fileDiffs: conv.fileDiffs,
+      })),
+    });
+  } catch (error: any) {
+    console.error('❌ [CONVERSATIONS] Error fetching conversations:', error);
+    res.status(500).json({ error: error.message });
+  }
+}
+
+export async function chatWithProject(req: Request, res: Response) {
+  try {
+    const { projectId, message, provider = 'claude', multiAgent = false } = req.body as ChatRequest;
+
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('📨 [CHAT] New chat request received');
+    console.log('  Project ID:', projectId);
+    console.log('  Message:', message);
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+    if (!projectId || !message) {
+      console.log('❌ [CHAT] Missing required fields');
+      return res.status(400).json({ error: 'Project ID and message are required' });
+    }
+
+    // Verify project exists and belongs to user
+    const userId = (req as any).userId;
+    console.log('🔍 [CHAT] Verifying project for user:', userId);
+
+    const project = await prisma.project.findFirst({
+      where: {
+        id: projectId,
+        userId,
+      },
+    });
+
+    if (!project) {
+      console.log('❌ [CHAT] Project not found');
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    console.log('✅ [CHAT] Project found:', project.name);
+
+    // Get game type from project
+    const gameType = (project.gameType as '2d' | '3d') || '3d';
+    console.log('🎮 [CHAT] Game Type:', gameType);
+
+    // Save user message to database
+    console.log('💾 [CHAT] Saving user message to database...');
+    await prisma.conversation.create({
+      data: {
+        projectId,
+        role: 'user',
+        content: message,
+      },
+    });
+    console.log('✅ [CHAT] User message saved');
+
+    console.log('🤖 [CHAT] Using provider:', provider);
+    console.log('🤖 [CHAT] Multi-agent mode:', multiAgent);
+
+    // Fetch previous conversations for context (last 10 messages)
+    console.log('📚 [CHAT] Fetching previous conversations for context...');
+    const previousConversations = await prisma.conversation.findMany({
+      where: {
+        projectId,
+      },
+      orderBy: {
+        createdAt: 'asc',
+      },
+      take: 20, // Get last 20 messages (10 pairs of user+assistant)
+      select: {
+        role: true,
+        content: true,
+        createdAt: true,
+        taskGraph: true,
+        toolCalls: true,
+      },
+    });
+    console.log(`✅ [CHAT] Found ${previousConversations.length} previous messages`);
+
+    // Build task history from previous conversations
+    console.log('📋 [CHAT] Building task history from previous conversations...');
+    const taskHistory = buildTaskHistory(previousConversations);
+    console.log(`✅ [CHAT] Task history built: ${taskHistory.completedCount} completed, ${taskHistory.failedCount} failed`);
+
     // Set up SSE
+    console.log('📡 [CHAT] Setting up SSE stream...');
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
 
     // Helper to send SSE messages
     const sendEvent = (event: string, data: any) => {
+      console.log(`📤 [SSE] Sending event: ${event}`, JSON.stringify(data).substring(0, 100));
       res.write(`event: ${event}\n`);
       res.write(`data: ${JSON.stringify(data)}\n\n`);
     };
 
     try {
+      // Route to Claude Multi-Agent if enabled
+      if (provider === 'claude' && multiAgent) {
+        console.log('🟦 [CHAT] Using Claude Multi-Agent system');
+
+        const claudeApiKey = process.env.ANTHROPIC_API_KEY;
+        if (!claudeApiKey) {
+          sendEvent('error', { message: 'ANTHROPIC_API_KEY not configured' });
+          res.end();
+          return;
+        }
+
+        sendEvent('status', { message: 'Starting Claude multi-agent system...' });
+
+        const orchestrator = new ClaudeMultiAgentOrchestrator({
+          apiKey: claudeApiKey,
+          projectId,
+          userMessage: message,
+          conversationHistory: previousConversations.map(c => ({
+            role: c.role,
+            content: c.content,
+          })),
+          taskHistory: taskHistory.summary,
+          gameType,
+          onEvent: (event: string, data: any) => {
+            sendEvent(event, data);
+          },
+        });
+
+        await orchestrator.execute(message);
+
+        const taskGraph = orchestrator.getTaskGraph();
+
+        // Save assistant response with task graph
+        const completedTasks = taskGraph.tasks.filter(t => t.status === 'completed');
+        const assistantResponse = completedTasks
+          .map(t => `✅ ${t.description}\n${t.result}`)
+          .join('\n\n');
+
+        await prisma.conversation.create({
+          data: {
+            projectId,
+            role: 'assistant',
+            content: assistantResponse || 'Tasks completed',
+            provider: 'claude',
+            taskGraph: taskGraph as any,
+          },
+        });
+
+        console.log('✅ [CLAUDE MA] Response saved to database');
+
+        res.end();
+        console.log('🏁 [CHAT] Claude multi-agent response stream ended');
+        return;
+      }
+
+      // Route to Gemini if selected
+      if (provider === 'gemini') {
+        console.log('🟣 [CHAT] Using Gemini provider');
+
+        const geminiApiKey = process.env.GEMINI_API_KEY;
+        if (!geminiApiKey) {
+          sendEvent('error', { message: 'GEMINI_API_KEY not configured' });
+          res.end();
+          return;
+        }
+
+        sendEvent('status', { message: 'Starting Gemini AI multi-agent system...' });
+
+        const result = await chatWithGemini({
+          apiKey: geminiApiKey,
+          projectId,
+          projectPath: `/var/lib/rancher/k3s/storage/${projectId}/app`,
+          gameType,
+          userMessage: message,
+          conversationHistory: previousConversations.map(c => ({
+            role: c.role,
+            content: c.content,
+          })),
+          taskHistory: taskHistory.summary,
+          onEvent: (event: string, data: any) => {
+            sendEvent(event, data);
+          },
+        });
+
+        // Save assistant response with full conversation history
+        await prisma.conversation.create({
+          data: {
+            projectId,
+            role: 'assistant',
+            content: result.response || 'Task completed',
+            provider: 'gemini',
+          },
+        });
+        console.log('✅ [GEMINI] Response saved to database');
+
+        res.end();
+        console.log('🏁 [CHAT] Gemini response stream ended');
+        return;
+      }
       // Get recent pod logs for context
+      console.log('📋 [CHAT] Fetching pod logs for context...');
       const recentLogs = await getPodLogs(projectId, 60).catch(() => '');
       const errors = recentLogs.split('\n').filter(line =>
         line.toLowerCase().includes('error') ||
         line.toLowerCase().includes('failed') ||
         line.toLowerCase().includes('warn')
       ).slice(-5).join('\n');
+      console.log('📋 [CHAT] Found errors:', errors ? errors.substring(0, 200) : 'none');
+
+      // Build conversation history context
+      let conversationContext = '';
+      if (previousConversations.length > 0) {
+        console.log('📝 [CHAT] Building conversation context from previous messages...');
+        conversationContext = '\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
+        conversationContext += '📜 PREVIOUS CONVERSATION HISTORY:\n';
+        conversationContext += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
+        conversationContext += 'Here is the conversation history for this project. Use this to understand\n';
+        conversationContext += 'the context and continue the conversation naturally:\n\n';
+
+        previousConversations.forEach((conv, index) => {
+          const role = conv.role === 'user' ? 'User' : (conv.role === 'assistant' ? 'You (Assistant)' : 'System');
+          conversationContext += `${role}: ${conv.content}\n\n`;
+        });
+
+        conversationContext += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
+      }
 
       // Create enhanced prompt for game building
-      const enhancedPrompt = createGamePrompt(message, gameType, errors);
+      console.log('✍️  [CHAT] Creating enhanced prompt...');
+      const enhancedPrompt = createGamePrompt(message, gameType, errors, conversationContext, taskHistory.summary);
+      console.log('✍️  [CHAT] Prompt length:', enhancedPrompt.length, 'chars');
 
       // Create tools bound to this project
+      console.log('🔧 [CHAT] Creating project tools...');
       const projectTools = createProjectTools(projectId);
+      console.log('🔧 [CHAT] Tools created:', Object.keys(projectTools).length, 'tools');
 
       // Create MCP server with tools
+      console.log('🔧 [CHAT] Creating MCP server...');
       const mcpServer = createSdkMcpServer({
         name: 'game-builder-tools',
         version: '1.0.0',
         tools: projectTools,
       });
+      console.log('✅ [CHAT] MCP server created');
 
       // Get or create session ID
       const sessionKey = `${userId}-${projectId}`;
       const sessionId = sessionStore.get(sessionKey);
+      console.log('🔑 [CHAT] Session:', sessionId ? `Resuming ${sessionId.substring(0, 8)}...` : 'New session');
 
       sendEvent('status', { message: 'Starting AI assistant...' });
 
       // Query Claude Agent SDK
+      console.log('🤖 [CHAT] Starting Claude Agent SDK query...');
+      console.log('🤖 [CHAT] Model: claude-sonnet-4-5-20250929');
+      console.log('🤖 [CHAT] Max turns: 30');
+
       const result = query({
         prompt: enhancedPrompt,
         options: {
-          model: 'claude-sonnet-4-5-20251022',
+          model: 'claude-sonnet-4-5-20250929',
           maxTurns: 30,
           maxBudgetUsd: 0.5,
+          permissionMode: 'bypassPermissions', // Auto-approve all tool calls without prompts
           mcpServers: {
             'game-builder-tools': mcpServer,
           },
@@ -89,22 +339,32 @@ export async function chatWithProject(req: Request, res: Response) {
 
       let turnCount = 0;
       let assistantResponse = '';
+      let toolCallsLog: any[] = [];
+      let fileChanges: any[] = [];
+
+      console.log('🔄 [CHAT] Starting to process Claude Agent SDK responses...');
 
       for await (const msg of result) {
+        console.log('📨 [SDK] Received message:', msg.type, (msg as any).subtype || '');
+
         // Capture session ID for conversation continuity
         if (msg.type === 'system' && msg.subtype === 'init') {
+          console.log('🔑 [SDK] Session initialized:', msg.session_id);
           sessionStore.set(sessionKey, msg.session_id);
           sendEvent('session', { sessionId: msg.session_id });
         }
 
         if (msg.type === 'assistant') {
           turnCount++;
+          console.log(`🔄 [SDK] Turn ${turnCount} - Processing assistant message`);
           sendEvent('turn', { count: turnCount });
+          sendEvent('status', { message: `Processing turn ${turnCount}...` });
 
           // Send assistant text content
           const textContent = msg.message.content.find((c: any) => c.type === 'text');
           if (textContent) {
             const text = (textContent as any).text;
+            console.log(`💬 [SDK] Assistant text (${text.length} chars):`, text.substring(0, 100));
             assistantResponse += text;
             sendEvent('message', { text });
           }
@@ -112,40 +372,181 @@ export async function chatWithProject(req: Request, res: Response) {
           // Send tool usage info
           const toolUses = msg.message.content.filter((c: any) => c.type === 'tool_use');
           if (toolUses.length > 0) {
+            console.log(`🔧 [SDK] ${toolUses.length} tool call(s) in this turn`);
             for (const tool of toolUses) {
-              sendEvent('tool', {
+              const toolCall = {
                 name: (tool as any).name,
                 input: (tool as any).input,
-              });
+              };
+              console.log(`🔧 [SDK] Tool call: ${toolCall.name}`);
+              console.log(`🔧 [SDK] Input:`, JSON.stringify(toolCall.input).substring(0, 200));
+              toolCallsLog.push(toolCall);
+
+              // Track file changes
+              if (toolCall.name === 'write_file') {
+                console.log(`📝 [SDK] File write: ${toolCall.input.path}`);
+                fileChanges.push({
+                  path: toolCall.input.path,
+                  action: 'modified',
+                  content: toolCall.input.content,
+                });
+              }
+
+              sendEvent('tool', toolCall);
+              sendEvent('status', { message: `Executing: ${toolCall.name}` });
             }
           }
         } else if (msg.type === 'result') {
+          console.log('✅ [SDK] Result received:', msg.subtype);
           if (msg.subtype === 'success') {
+            console.log('💾 [SDK] Saving conversation to database...');
+            // Save assistant response to database
+            await prisma.conversation.create({
+              data: {
+                projectId,
+                role: 'assistant',
+                content: assistantResponse || msg.result || '',
+                ...(toolCallsLog.length > 0 && { toolCalls: toolCallsLog }),
+                ...(fileChanges.length > 0 && { fileDiffs: fileChanges }),
+              },
+            });
+            console.log('✅ [SDK] Conversation saved');
+
             sendEvent('complete', {
               result: msg.result || assistantResponse,
               usage: msg.usage,
             });
           } else {
+            console.log('❌ [SDK] Error:', msg.subtype);
             sendEvent('error', { subtype: msg.subtype });
           }
         }
       }
 
+      console.log('✅ [CHAT] Claude Agent SDK query completed');
+
       res.end();
+      console.log('🏁 [CHAT] Response stream ended');
     } catch (error: any) {
+      console.error('❌ [CHAT] Error during Claude Agent SDK query:', error);
+      console.error('❌ [CHAT] Error stack:', error.stack);
       sendEvent('error', { message: error.message });
       res.end();
     }
   } catch (error: any) {
-    console.error('Chat error:', error);
+    console.error('❌ [CHAT] Fatal error:', error);
+    console.error('❌ [CHAT] Error stack:', error.stack);
     res.status(500).json({ error: error.message });
   }
 }
 
-function createGamePrompt(userMessage: string, gameType: '2d' | '3d', recentErrors: string): string {
+interface TaskHistory {
+  completedTasks: Array<{ id: string; description: string; result?: string }>;
+  failedTasks: Array<{ id: string; description: string; error?: string }>;
+  pendingTasks: Array<{ id: string; description: string }>;
+  completedCount: number;
+  failedCount: number;
+  pendingCount: number;
+  summary: string;
+}
+
+function buildTaskHistory(conversations: any[]): TaskHistory {
+  const allCompletedTasks: Array<{ id: string; description: string; result?: string }> = [];
+  const allFailedTasks: Array<{ id: string; description: string; error?: string }> = [];
+  const allPendingTasks: Array<{ id: string; description: string }> = [];
+
+  for (const conv of conversations) {
+    if (conv.taskGraph && typeof conv.taskGraph === 'object') {
+      const taskGraph = conv.taskGraph as any;
+
+      if (taskGraph.tasks && Array.isArray(taskGraph.tasks)) {
+        for (const task of taskGraph.tasks) {
+          if (task.status === 'completed') {
+            allCompletedTasks.push({
+              id: task.id,
+              description: task.description,
+              result: task.result,
+            });
+          } else if (task.status === 'failed') {
+            allFailedTasks.push({
+              id: task.id,
+              description: task.description,
+              error: task.error,
+            });
+          } else if (task.status === 'pending' || task.status === 'in_progress') {
+            allPendingTasks.push({
+              id: task.id,
+              description: task.description,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // Build summary
+  let summary = '';
+  if (allCompletedTasks.length > 0 || allFailedTasks.length > 0 || allPendingTasks.length > 0) {
+    summary = '\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
+    summary += '📊 TASK HISTORY FOR THIS PROJECT:\n';
+    summary += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
+
+    if (allCompletedTasks.length > 0) {
+      summary += `✅ COMPLETED TASKS (${allCompletedTasks.length}):\n`;
+      allCompletedTasks.forEach((task, i) => {
+        summary += `${i + 1}. ${task.description}\n`;
+        if (task.result) {
+          const resultPreview = task.result.substring(0, 100);
+          summary += `   Result: ${resultPreview}${task.result.length > 100 ? '...' : ''}\n`;
+        }
+      });
+      summary += '\n';
+    }
+
+    if (allFailedTasks.length > 0) {
+      summary += `❌ FAILED TASKS (${allFailedTasks.length}):\n`;
+      allFailedTasks.forEach((task, i) => {
+        summary += `${i + 1}. ${task.description}\n`;
+        if (task.error) {
+          summary += `   Error: ${task.error}\n`;
+        }
+      });
+      summary += '\n';
+    }
+
+    if (allPendingTasks.length > 0) {
+      summary += `⏳ PENDING TASKS (${allPendingTasks.length}):\n`;
+      allPendingTasks.forEach((task, i) => {
+        summary += `${i + 1}. ${task.description}\n`;
+      });
+      summary += '\n';
+    }
+
+    summary += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
+    summary += 'Use this task history to understand what has already been done and what remains.\n';
+    summary += 'Avoid redoing completed tasks unless explicitly requested.\n';
+    summary += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
+  }
+
+  return {
+    completedTasks: allCompletedTasks,
+    failedTasks: allFailedTasks,
+    pendingTasks: allPendingTasks,
+    completedCount: allCompletedTasks.length,
+    failedCount: allFailedTasks.length,
+    pendingCount: allPendingTasks.length,
+    summary,
+  };
+}
+
+function createGamePrompt(userMessage: string, gameType: '2d' | '3d', recentErrors: string, conversationContext: string = '', taskHistoryContext: string = ''): string {
   const is3D = gameType === '3d';
 
   return `You are an expert game developer helping to build a ${gameType.toUpperCase()} game using React + ${is3D ? 'Three.js' : 'HTML5 Canvas'}.
+
+${conversationContext}
+
+${taskHistoryContext}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ⚠️  CRITICAL: PROJECT CONTEXT - READ FIRST
@@ -192,6 +593,7 @@ Core:
   - react@18.3.1, react-dom@18.3.1
   - vite@5.0.0 (dev server, HMR enabled)
   - typescript@5.6.0
+  - tailwindcss@3.4.0 (for styling - USE THIS EXCLUSIVELY)
 ${is3D ? `
 3D Game:
   - three@0.160.0
@@ -240,25 +642,56 @@ AVAILABLE TOOLS:
 - execute_command: Run commands (npm install, etc.)
 - list_files: List directory contents
 - get_folder_structure: View project structure
+- get_pod_logs: Read the last N seconds of logs from the Vite dev server (USE THIS TO CHECK FOR ERRORS!)
+- run_build: Run npm run build to verify the project builds successfully (REQUIRED AT THE END!)
 
-⚠️  DO NOT:
+⚠️  CRITICAL - DO NOT:
+- **NEVER CREATE .css FILES** - Tailwind CSS is already configured, use it exclusively
+- **NEVER USE <style> TAGS** - All styling must be done with Tailwind utility classes
+- **NEVER WRITE CUSTOM CSS** - Use only Tailwind classes like "bg-blue-500", "text-xl", etc.
 - Read config files unless debugging specific issues
 - Reinstall packages that are already there
 - Create overly complex systems for simple games
 - Use external APIs without explicit instruction
 - Write files outside /app directory
 
-✅ DO:
+✅ CRITICAL - ALWAYS DO:
+- **USE TAILWIND CSS ONLY** - Style all components with Tailwind utility classes
+- **VERIFY BUILD WORKS** - After making changes, read the pod logs to check for errors
+- **FIX ALL ERRORS** - If you see errors in logs, fix them before finishing
+- **TEST YOUR CHANGES** - Read logs after writing files to ensure no syntax errors
 - Start implementing game logic immediately
 - Focus on core gameplay first, polish later
 - Write clean, commented code for game logic
-- Test frequently during development
 - Keep game loop and rendering separate
 - Use meaningful variable names for game entities
 
 ${recentErrors ? `⚠️  RECENT ERRORS:\n${recentErrors}\n\nPlease address these errors if they're related to the current task.\n` : ''}
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 VERIFICATION WORKFLOW - FOLLOW THIS PROCESS EVERY TIME:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. **Make your changes** - Write/edit files as needed
+2. **Read pod logs** - Use get_pod_logs tool to check for runtime errors
+3. **Fix any errors** - If you see errors in logs, fix them immediately
+4. **RUN BUILD** - Use run_build tool to verify the project builds successfully
+5. **Fix build errors** - If build fails, fix ALL errors and run build again
+6. **Only then finish** - Don't complete until build succeeds with no errors
+
+⚠️  CRITICAL: You MUST run the run_build tool before finishing your work!
+This ensures the project actually compiles and has no TypeScript/build errors.
+
+If you see errors like:
+- "Failed to resolve import"
+- "Expected ';'"
+- "Cannot find module"
+- "Type error"
+Then you MUST fix them and run build again!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 USER REQUEST: ${userMessage}
 
-Let's build an amazing game! Focus on fun, responsive gameplay.`;
+Let's build an amazing game! Focus on fun, responsive gameplay. Remember to verify there are no errors before finishing!`;
 }

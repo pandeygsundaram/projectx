@@ -32,6 +32,7 @@ model Project {
   name           String?
   status         String         @default("initializing") // 'initializing', 'building', 'ready', 'error', 'deleted', 'hibernated'
   template       String         @default("vite-react")
+  gameType       String         @default("3d") @map("game_type") // '2d' or '3d'
   podName        String?        @map("pod_name")
   serviceName    String?        @map("service_name")
   pvcName        String?        @map("pvc_name")
@@ -56,8 +57,10 @@ model Conversation {
   projectId String   @map("project_id")
   role      String // 'user' or 'assistant'
   content   String   @db.Text
-  toolCalls Json?    @map("tool_calls") // Array of tool calls made by Claude
+  toolCalls Json?    @map("tool_calls") // Array of tool calls made by Claude/Gemini
   fileDiffs Json?    @map("file_diffs") // Array of file changes: [{ path, action, content }]
+  taskGraph Json?    @map("task_graph") // Multi-agent task graph: { tasks: [], rootTaskIds: [], status: {}, results: {} }
+  provider  String?  @default("claude") // 'claude' or 'gemini'
   createdAt DateTime @default(now()) @map("created_at")
   project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 

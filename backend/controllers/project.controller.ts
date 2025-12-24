@@ -13,6 +13,7 @@ import {
   copyBuiltFilesFromPod,
 } from '../services/kubernetes';
 import { uploadDeployment } from '../utils/r2Storage';
+import { restoreProjectSnapshot, hasProjectSnapshots } from '../services/snapshot';
 
 const PREVIEW_DOMAIN = 'projects.samosa.wtf';
 const STREAM_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
@@ -33,7 +34,7 @@ async function getUserActivePod(userId: string) {
 export const createProject = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).userId;
-    const { name, prompt } = req.body;
+    const { name, prompt , } = req.body;
 
     // Check if user already has an active pod
     const activePod = await getUserActivePod(userId);
@@ -62,6 +63,7 @@ export const createProject = async (req: Request, res: Response) => {
       // Create K8s deployment
       const previewUrl = await createProjectPod({
         projectId: project.id,
+        template: project.gameType as '2d' | '3d',
       });
 
       // Update project with pod info
@@ -152,6 +154,7 @@ export const openProject = async (req: Request, res: Response) => {
     // For now, we'll use the default template. Later, we'll pull from R2
     const previewUrl = await createProjectPod({
       projectId: project.id,
+        template: project.gameType as '2d' | '3d',
     });
 
     await prisma.project.update({
@@ -427,7 +430,7 @@ function detectStageFromLogs(logs: string): string | null {
 // Create project with SSE streaming
 export const createProjectStream = async (req: Request, res: Response) => {
   const userId = (req as any).userId;
-  const { name, prompt } = req.body;
+  const { name, prompt, gameType = '3d' } = req.body;
 
   // Set SSE headers
   res.setHeader('Content-Type', 'text/event-stream');
@@ -458,6 +461,7 @@ export const createProjectStream = async (req: Request, res: Response) => {
         userId,
         name: name || 'Untitled Project',
         status: 'initializing',
+        gameType: gameType || '3d',
       },
     });
   } catch (error) {
@@ -468,7 +472,7 @@ export const createProjectStream = async (req: Request, res: Response) => {
   sendSSE(res, 'stage', { stage: 'deploying', message: 'Creating deployment...' });
 
   try {
-    await createProjectPod({ projectId: project.id });
+    await createProjectPod({ projectId: project.id ,   template: project.gameType as '2d' | '3d',});
 
     await prisma.project.update({
       where: { id: project.id },
@@ -554,7 +558,7 @@ export const openProjectStream = async (req: Request, res: Response) => {
 
   // Start the pod
   try {
-    await createProjectPod({ projectId: project.id });
+    await createProjectPod({ projectId: project.id ,   template: project.gameType as '2d' | '3d',});
 
     await prisma.project.update({
       where: { id: project.id },
@@ -565,6 +569,25 @@ export const openProjectStream = async (req: Request, res: Response) => {
         lastActivityAt: new Date(),
       },
     });
+
+    // Check if there's a snapshot to restore
+    const hasSnapshot = await hasProjectSnapshots(project.id);
+    if (hasSnapshot) {
+      sendSSE(res, 'stage', { stage: 'installing_deps', message: 'Restoring from snapshot...' });
+      console.log(`📥 [RESUME] Restoring project ${project.id} from snapshot...`);
+
+      try {
+        const restored = await restoreProjectSnapshot(project.id);
+        if (restored) {
+          console.log(`✅ [RESUME] Project ${project.id} restored from snapshot`);
+          sendSSE(res, 'stage', { stage: 'installing_deps', message: 'Snapshot restored, starting project...' });
+        }
+      } catch (snapshotError) {
+        console.error(`⚠️  [RESUME] Failed to restore snapshot for ${project.id}:`, snapshotError);
+        sendSSE(res, 'stage', { stage: 'installing_deps', message: 'Snapshot restore failed, using default template...' });
+        // Continue without snapshot
+      }
+    }
   } catch (error) {
     await prisma.project.update({
       where: { id: project.id },

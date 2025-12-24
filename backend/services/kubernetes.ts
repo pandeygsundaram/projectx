@@ -19,8 +19,8 @@ const execApi = new k8s.Exec(kc);
 
 const NAMESPACE = 'default';
 const PREVIEW_DOMAIN = 'projects.samosa.wtf';
-const DEFAULT_TEMPLATE_REPO = 'https://github.com/neekunjchaturvedi/game-template'; // Game template with React + Three.js
-const PROJECT_DIR = '/app'; // Directory inside pod where code is cloned
+const DEFAULT_TEMPLATE_REPO = 'https://github.com/pandeygsundaram/game-template.git'; // Game template with React + Three.js
+const PROJECT_DIR = '/app/react-templete'; // Directory inside pod where code is cloned
 
 // K8s names must start with letter, so prefix project IDs
 function toK8sName(projectId: string): string {
@@ -30,10 +30,17 @@ function toK8sName(projectId: string): string {
 export interface PodConfig {
   projectId: string;
   gitRepo?: string;
+  template: '2d' | '3d';
 }
 
+const TEMPLATE_DIR_MAP: Record<'2d' | '3d', string> = {
+  '2d': 'mario',
+  '3d': '3d-test-threejs', // or '3d-test-threejs'
+};
+
 export async function createProjectPod(config: PodConfig): Promise<string> {
-  const { projectId, gitRepo = DEFAULT_TEMPLATE_REPO } = config;
+  const { projectId, gitRepo = DEFAULT_TEMPLATE_REPO, template } = config;
+  const templateDir = TEMPLATE_DIR_MAP[template];
   const k8sName = toK8sName(projectId);
 
   // Create Deployment
@@ -68,7 +75,7 @@ export async function createProjectPod(config: PodConfig): Promise<string> {
                 apk add --no-cache git && \
                 echo "📥 Cloning repo..." && \
                 git clone ${gitRepo} /app && \
-                cd /app && \
+                cd /app/react-templete && \
                 echo "📦 Installing dependencies..." && \
                 npm install && \
                 echo "🚀 Starting dev server..." && \

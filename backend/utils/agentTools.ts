@@ -1,6 +1,6 @@
 import { tool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
-import { readProjectFile, writeProjectFile, executeInPod } from '../services/kubernetes';
+import { readProjectFile, writeProjectFile, executeInPod, getPodLogs } from '../services/kubernetes';
 
 // Factory function to create tools bound to a specific project
 export function createProjectTools(projectId: string) {
@@ -174,11 +174,109 @@ export function createProjectTools(projectId: string) {
     }
   );
 
+  // Get Pod Logs Tool - reads Vite dev server logs to check for errors
+  const getPodLogsTool = tool(
+    'get_pod_logs',
+    'Read the last N seconds of logs from the Vite dev server. Use this to check for build errors, runtime errors, or to verify changes worked correctly.',
+    {
+      seconds: z.number().default(30).describe('Number of seconds of logs to retrieve (default 30)'),
+    },
+    async (args) => {
+      try {
+        const logs = await getPodLogs(projectId, args.seconds);
+
+        // Filter for errors and important messages
+        const lines = logs.split('\n');
+        const hasErrors = lines.some(line =>
+          line.toLowerCase().includes('error') ||
+          line.toLowerCase().includes('failed') ||
+          line.toLowerCase().includes('cannot find')
+        );
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Pod logs (last ${args.seconds} seconds):\n\`\`\`\n${logs}\n\`\`\`\n\n${hasErrors ? '⚠️ ERRORS DETECTED - Please fix these issues!' : '✅ No errors detected'}`,
+            },
+          ],
+          isError: hasErrors,
+        };
+      } catch (error: any) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Error reading pod logs: ${error.message}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+  );
+
+  // Run Build Tool - runs npm run build and returns any errors
+  const runBuildTool = tool(
+    'run_build',
+    'Run npm run build to verify the project builds successfully. Returns build output and any errors. ALWAYS use this at the end of your work to verify everything works!',
+    {
+      // No parameters needed
+    },
+    async (args) => {
+      try {
+        console.log('🏗️  [BUILD TOOL] Running npm run build...');
+        const buildOutput = await executeInPod(projectId, 'cd /app && npm run build 2>&1');
+
+        // Check if build was successful
+        const hasErrors = buildOutput.toLowerCase().includes('error') ||
+                         buildOutput.toLowerCase().includes('failed') ||
+                         buildOutput.includes('ERR!');
+
+        if (hasErrors) {
+          console.log('❌ [BUILD TOOL] Build failed with errors');
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `❌ BUILD FAILED! Please fix these errors:\n\`\`\`\n${buildOutput}\n\`\`\``,
+              },
+            ],
+            isError: true,
+          };
+        } else {
+          console.log('✅ [BUILD TOOL] Build successful');
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `✅ BUILD SUCCESSFUL!\n\`\`\`\n${buildOutput}\n\`\`\``,
+              },
+            ],
+          };
+        }
+      } catch (error: any) {
+        console.error('❌ [BUILD TOOL] Build command failed:', error);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `❌ BUILD COMMAND FAILED: ${error.message}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+  );
+
   return [
     readFileTool,
     writeFileTool,
     executeCommandTool,
     listFilesTool,
     getFolderStructureTool,
+    getPodLogsTool,
+    runBuildTool,
   ];
 }
