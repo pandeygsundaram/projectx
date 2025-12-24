@@ -16,6 +16,7 @@ export default function DashboardPage() {
   const { token } = useAuthStore()
   const { projects, isLoading, fetchProjects, stopProject, openProject, deleteProject } = useProjectStore()
   const [newProjectName, setNewProjectName] = useState("")
+  const [gameType, setGameType] = useState<'2d' | '3d'>('3d')
   const [showCreateForm, setShowCreateForm] = useState(false)
 
   useEffect(() => {
@@ -26,8 +27,8 @@ export default function DashboardPage() {
 
   const handleCreateProject = () => {
     if (newProjectName.trim()) {
-      // Navigate to project creation screen with the name
-      router.push(`/dashboard/project/new?name=${encodeURIComponent(newProjectName.trim())}`)
+      // Navigate to project creation screen with the name and game type
+      router.push(`/dashboard/project/new?name=${encodeURIComponent(newProjectName.trim())}&gameType=${gameType}`)
     }
   }
 
@@ -118,21 +119,52 @@ export default function DashboardPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="My Awesome App"
-                    value={newProjectName}
-                    onChange={(e) => setNewProjectName(e.target.value)}
-                    onKeyPress={(e) => e.key === "Enter" && handleCreateProject()}
-                    autoFocus
-                  />
-                  <Button
-                    onClick={handleCreateProject}
-                    disabled={!newProjectName.trim()}
-                    className="bg-blue-600 hover:bg-blue-700"
-                  >
-                    Create
-                  </Button>
+                <div className="space-y-4">
+                  {/* Game Type Toggle */}
+                  <div>
+                    <label className="text-sm font-medium mb-2 block">Game Type</label>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant={gameType === '2d' ? 'default' : 'outline'}
+                        onClick={() => setGameType('2d')}
+                        className={gameType === '2d' ? 'bg-blue-600 hover:bg-blue-700' : ''}
+                      >
+                        2D Game
+                      </Button>
+                      <Button
+                        type="button"
+                        variant={gameType === '3d' ? 'default' : 'outline'}
+                        onClick={() => setGameType('3d')}
+                        className={gameType === '3d' ? 'bg-blue-600 hover:bg-blue-700' : ''}
+                      >
+                        3D Game
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-2">
+                      {gameType === '2d'
+                        ? 'Create a 2D game using HTML5 Canvas'
+                        : 'Create a 3D game using Three.js and React Three Fiber'}
+                    </p>
+                  </div>
+
+                  {/* Project Name Input */}
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="My Awesome Game"
+                      value={newProjectName}
+                      onChange={(e) => setNewProjectName(e.target.value)}
+                      onKeyPress={(e) => e.key === "Enter" && handleCreateProject()}
+                      autoFocus
+                    />
+                    <Button
+                      onClick={handleCreateProject}
+                      disabled={!newProjectName.trim()}
+                      className="bg-blue-600 hover:bg-blue-700"
+                    >
+                      Create
+                    </Button>
+                  </div>
                 </div>
               </CardContent>
             </Card>

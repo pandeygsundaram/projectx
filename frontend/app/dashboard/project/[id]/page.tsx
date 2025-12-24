@@ -7,24 +7,27 @@ import { useProjectStore } from "@/lib/stores/projectStore"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card } from "@/components/ui/card"
-import { Loader2, Send, Code, Monitor, X, RefreshCw, Rocket, ExternalLink } from "lucide-react"
+import { Loader2, Send, Code, Monitor, X, RefreshCw, Rocket, ExternalLink, Wrench, Sparkles, Brain, Network } from "lucide-react"
 import { motion } from "framer-motion"
 import type { Message, SSEStageEvent } from "@/types"
 import { FileTree, type FileNode } from "@/components/dashboard/FileTree"
 import { CodeViewer } from "@/components/dashboard/CodeViewer"
 import axios from "axios"
+import { sendChatMessage, fetchConversations, type Conversation } from "@/lib/api/chat"
 
 export default function ProjectPage() {
   const params = useParams()
   const searchParams = useSearchParams()
   const router = useRouter()
   const { token } = useAuthStore()
-  const { currentProject, fetchProject, addMessage, messages, setCurrentProject } = useProjectStore()
+  const { currentProject, fetchProject, addMessage, messages, setMessages, setCurrentProject } = useProjectStore()
 
   const [isCreating, setIsCreating] = useState(false)
+  const [isChatting, setIsChatting] = useState(false)
   const [inputValue, setInputValue] = useState("")
   const [activeTab, setActiveTab] = useState<"preview" | "code">("preview")
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const [currentToolCall, setCurrentToolCall] = useState<string | null>(null)
   const creationInitiated = useRef(false)
   const [iframeKey, setIframeKey] = useState(0)
 
@@ -39,10 +42,13 @@ export default function ProjectPage() {
   const [isDeploying, setIsDeploying] = useState(false)
   const [deploymentUrl, setDeploymentUrl] = useState<string | null>(null)
   const [deployStatus, setDeployStatus] = useState<{stage: string; message: string} | null>(null)
+  const [aiProvider, setAiProvider] = useState<'claude' | 'gemini'>('claude')
+  const [multiAgentMode, setMultiAgentMode] = useState(false)
 
   const projectId = params.id as string
   const isNewProject = projectId === "new"
   const projectName = searchParams.get("name")
+  const gameType = (searchParams.get("gameType") as '2d' | '3d') || '3d'
 
   useEffect(() => {
     console.log("🔵 [Main Effect] Triggered", {
@@ -72,6 +78,33 @@ export default function ProjectPage() {
       handleResumeProject()
     }
   }, [currentProject?.status, token, isNewProject])
+
+  // Load conversation history when project is loaded
+  useEffect(() => {
+    if (currentProject?.id && token && !isNewProject) {
+      console.log("📚 [Chat History] Loading conversation history for project:", currentProject.id)
+
+      fetchConversations(token, currentProject.id)
+        .then((conversations) => {
+          console.log("✅ [Chat History] Loaded", conversations.length, "messages")
+
+          // Convert conversations to Message format
+          const loadedMessages: Message[] = conversations.map((conv) => ({
+            id: conv.id,
+            role: conv.role,
+            content: conv.content,
+            timestamp: conv.timestamp,
+          }))
+
+          // Replace all messages with the loaded conversation history
+          setMessages(loadedMessages)
+          console.log("✅ [Chat History] Messages loaded into store")
+        })
+        .catch((error) => {
+          console.error("❌ [Chat History] Failed to load conversations:", error)
+        })
+    }
+  }, [currentProject?.id, token, isNewProject])
 
   // Fetch file tree ONCE when project status is 'ready'
   useEffect(() => {
@@ -257,7 +290,7 @@ export default function ProjectPage() {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`,
         },
-        body: JSON.stringify({ name: prompt, prompt }),
+        body: JSON.stringify({ name: prompt, prompt, gameType }),
       })
 
       if (!response.ok) {
@@ -359,24 +392,119 @@ export default function ProjectPage() {
     }
   }
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     if (!inputValue.trim()) return
 
     if (isNewProject) {
       handleCreateProject(inputValue.trim())
     } else {
-      // For existing projects, this would send a message to the AI
-      // This functionality is not yet implemented in the backend
-      const userMessage: Message = {
-        id: Date.now().toString(),
-        role: "user",
-        content: inputValue.trim(),
-        timestamp: new Date().toISOString(),
-      }
-      addMessage(userMessage)
+      // Send chat message to AI assistant
+      await handleChatWithAI(inputValue.trim())
     }
 
     setInputValue("")
+  }
+
+  const handleChatWithAI = async (message: string) => {
+    if (!token || !currentProject?.id) return
+
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('💬 [UI] handleChatWithAI called');
+    console.log('  Message:', message);
+    console.log('  Project ID:', currentProject.id);
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+    setIsChatting(true)
+    setCurrentToolCall(null)
+
+    // Add user message
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: "user",
+      content: message,
+      timestamp: new Date().toISOString(),
+    }
+    console.log('💬 [UI] Adding user message:', userMessage);
+    addMessage(userMessage)
+
+    try {
+      await sendChatMessage(
+        token,
+        {
+          projectId: currentProject.id,
+          message,
+          provider: aiProvider,
+          multiAgent: aiProvider === 'claude' ? multiAgentMode : true, // Gemini always multi-agent
+        },
+        {
+          onStatus: (statusMessage) => {
+            console.log("📊 [UI Handler] Status:", statusMessage)
+          },
+          onMessage: (text) => {
+            console.log("💬 [UI Handler] Message received:", text.substring(0, 100))
+
+            // Create a new message for each text chunk from the assistant
+            const assistantMessage: Message = {
+              id: Date.now().toString() + Math.random(), // Unique ID for each message
+              role: "assistant",
+              content: text,
+              timestamp: new Date().toISOString(),
+            }
+            addMessage(assistantMessage)
+          },
+          onTool: (toolCall) => {
+            const toolInfo = `${toolCall.name}: ${toolCall.input.path || toolCall.input.command || ''}`
+            console.log("🔧 [UI Handler] Tool call:", toolInfo)
+            console.log("🔧 [UI Handler] Full tool data:", toolCall)
+            setCurrentToolCall(toolInfo)
+          },
+          onTurn: (count) => {
+            console.log("🔄 [UI Handler] Turn:", count)
+          },
+          onComplete: (result) => {
+            console.log("✅ [UI Handler] Complete:", result)
+            console.log("✅ [UI Handler] Setting chatting to false")
+            setCurrentToolCall(null)
+            setIsChatting(false)
+
+            // Refresh file tree if files were modified
+            if (result.result.includes('write_file') || result.result.includes('Successfully wrote')) {
+              console.log("📂 [UI Handler] Files modified, refreshing file tree...")
+              setTimeout(() => {
+                handleRefreshFiles()
+              }, 1000)
+            }
+
+            // Refresh iframe preview
+            console.log("🔄 [UI Handler] Refreshing preview...")
+            handleRefresh()
+          },
+          onError: (error) => {
+            console.error("❌ [UI Handler] Chat error:", error)
+            const errorMessage: Message = {
+              id: Date.now().toString(),
+              role: "system",
+              content: `Error: ${error.message || error.subtype || 'Unknown error'}`,
+              timestamp: new Date().toISOString(),
+            }
+            addMessage(errorMessage)
+            setIsChatting(false)
+            setCurrentToolCall(null)
+          },
+        }
+      )
+    } catch (error: any) {
+      console.error("Failed to send chat message:", error)
+      const errorMessage: Message = {
+        id: Date.now().toString(),
+        role: "system",
+        content: `Failed to send message: ${error.message}`,
+        timestamp: new Date().toISOString(),
+      }
+      addMessage(errorMessage)
+      setIsChatting(false)
+      setCurrentToolCall(null)
+    }
   }
 
   const handleRefresh = () => {
@@ -643,11 +771,24 @@ export default function ProjectPage() {
             </motion.div>
           ))}
 
-          {isCreating && (
+          {(isCreating || isChatting) && (
             <div className="flex justify-start">
               <div className="bg-muted rounded-lg px-4 py-2 flex items-center gap-2">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                <span className="text-sm">Processing...</span>
+                <span className="text-sm">
+                  {isCreating ? "Creating project..." : "Thinking..."}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {currentToolCall && (
+            <div className="flex justify-start">
+              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg px-4 py-2 flex items-center gap-2">
+                <Wrench className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                <span className="text-sm text-blue-900 dark:text-blue-100">
+                  {currentToolCall}
+                </span>
               </div>
             </div>
           )}
@@ -657,6 +798,59 @@ export default function ProjectPage() {
 
         {/* Input */}
         <div className="p-4 border-t">
+          {/* AI Provider Selector */}
+          <div className="mb-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground font-medium">AI Model:</span>
+                <div className="flex gap-1">
+                  <Button
+                    variant={aiProvider === 'claude' ? 'secondary' : 'ghost'}
+                    size="sm"
+                    onClick={() => setAiProvider('claude')}
+                    disabled={isCreating || isChatting}
+                  >
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    Claude
+                  </Button>
+                  <Button
+                    variant={aiProvider === 'gemini' ? 'secondary' : 'ghost'}
+                    size="sm"
+                    onClick={() => setAiProvider('gemini')}
+                    disabled={isCreating || isChatting}
+                  >
+                    <Brain className="h-4 w-4 mr-2" />
+                    Gemini
+                  </Button>
+                </div>
+              </div>
+              <span className="text-xs text-muted-foreground">
+                {aiProvider === 'claude'
+                  ? (multiAgentMode ? 'Multi-agent mode' : 'Fast single-agent')
+                  : 'Multi-agent system'}
+              </span>
+            </div>
+
+            {/* Multi-Agent Toggle for Claude */}
+            {aiProvider === 'claude' && (
+              <div className="flex items-center gap-2 pl-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={multiAgentMode}
+                    onChange={(e) => setMultiAgentMode(e.target.checked)}
+                    disabled={isCreating || isChatting}
+                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500"
+                  />
+                  <span className="text-sm text-muted-foreground flex items-center gap-1.5">
+                    <Network className="h-3.5 w-3.5" />
+                    Enable multi-agent task planning
+                  </span>
+                </label>
+              </div>
+            )}
+          </div>
+
           <div className="flex gap-2">
             <Input
               placeholder={
@@ -667,14 +861,14 @@ export default function ProjectPage() {
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyPress={(e) => e.key === "Enter" && handleSendMessage()}
-              disabled={isCreating}
+              disabled={isCreating || isChatting}
             />
             <Button
               onClick={handleSendMessage}
-              disabled={!inputValue.trim() || isCreating}
+              disabled={!inputValue.trim() || isCreating || isChatting}
               className="bg-blue-600 hover:bg-blue-700"
             >
-              {isCreating ? (
+              {(isCreating || isChatting) ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 <Send className="h-4 w-4" />
