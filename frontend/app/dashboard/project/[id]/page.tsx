@@ -44,6 +44,8 @@ export default function ProjectPage() {
   const [deployStatus, setDeployStatus] = useState<{stage: string; message: string} | null>(null)
   const [aiProvider, setAiProvider] = useState<'claude' | 'gemini'>('claude')
   const [multiAgentMode, setMultiAgentMode] = useState(false)
+  const [isRestarting, setIsRestarting] = useState(false)
+  const [restartStatus, setRestartStatus] = useState<{stage: string; message: string} | null>(null)
 
   const projectId = params.id as string
   const isNewProject = projectId === "new"
@@ -551,6 +553,129 @@ export default function ProjectPage() {
     }
   }
 
+  const handleRestart = async () => {
+    if (!token || !projectId) return
+
+    console.log("🔄 [Restart] Starting project restart via SSE...")
+    setIsRestarting(true)
+    setRestartStatus(null)
+    setHasAttemptedFetch(false)
+
+    try {
+      // Add a message to the conversation
+      const restartMessage: Message = {
+        id: Date.now().toString(),
+        role: "system",
+        content: "🔄 Restarting project pod...",
+        timestamp: new Date().toISOString(),
+      }
+      addMessage(restartMessage)
+
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/restart/stream`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+        },
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error("❌ [Restart] Response not OK:", response.status, response.statusText, errorText)
+        throw new Error(`Failed to start restart: ${response.status} ${response.statusText}`)
+      }
+
+      console.log("✅ [Restart] SSE connection established")
+
+      // Read the SSE stream
+      const reader = response.body?.getReader()
+      const decoder = new TextDecoder()
+
+      if (!reader) {
+        throw new Error("No response body")
+      }
+
+      let buffer = ""
+
+      while (true) {
+        const { done, value } = await reader.read()
+
+        if (done) {
+          setIsRestarting(false)
+          setRestartStatus(null)
+          break
+        }
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split("\n")
+        buffer = lines.pop() || ""
+
+        for (const line of lines) {
+          if (line.startsWith("event: ")) {
+            const eventType = line.slice(7).trim()
+            console.log("📡 [Restart] Event type:", eventType)
+            continue
+          }
+
+          if (line.startsWith("data: ")) {
+            try {
+              const jsonData = line.slice(6)
+              console.log("📡 [Restart] Raw data:", jsonData)
+              const data = JSON.parse(jsonData)
+
+              console.log("📡 [Restart] Parsed event:", data)
+
+              // Update restart status
+              if (data.stage) {
+                setRestartStatus({ stage: data.stage, message: data.message })
+              }
+
+              // Handle completion
+              if (data.stage === 'ready' && data.previewUrl) {
+                setIsRestarting(false)
+                setRestartStatus(null)
+
+                const successMessage: Message = {
+                  id: Date.now().toString() + Math.random(),
+                  role: "assistant",
+                  content: `✅ Project restarted successfully! Preview: ${data.previewUrl}`,
+                  timestamp: new Date().toISOString(),
+                }
+                addMessage(successMessage)
+
+                // Refresh the project status
+                if (token) {
+                  fetchProject(projectId, token)
+                }
+
+                // Refresh preview
+                handleRefresh()
+              }
+
+              // Handle error
+              if (data.error) {
+                throw new Error(data.error)
+              }
+            } catch (parseError) {
+              console.error("Error parsing SSE data:", parseError)
+            }
+          }
+        }
+      }
+    } catch (error: any) {
+      console.error("❌ [Restart] Failed to restart project:", error)
+      setIsRestarting(false)
+      setRestartStatus(null)
+
+      const errorMessage: Message = {
+        id: Date.now().toString(),
+        role: "system",
+        content: `❌ Restart failed: ${error.message}`,
+        timestamp: new Date().toISOString(),
+      }
+      addMessage(errorMessage)
+    }
+  }
+
   const handleDeploy = async () => {
     if (!token || !projectId) return
 
@@ -675,26 +800,52 @@ export default function ProjectPage() {
               </p>
             </div>
 
-            {/* Deploy Button */}
-            {currentProject?.status === "ready" && !isNewProject && (
-              <Button
-                onClick={handleDeploy}
-                disabled={isDeploying}
-                size="sm"
-                className="bg-green-600 hover:bg-green-700"
-              >
-                {isDeploying ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Deploying...
-                  </>
-                ) : (
-                  <>
-                    <Rocket className="h-4 w-4 mr-2" />
-                    Deploy
-                  </>
+            {/* Action Buttons */}
+            {currentProject && !isNewProject && (
+              <div className="flex gap-2">
+                {/* Restart button - always visible */}
+                <Button
+                  onClick={handleRestart}
+                  disabled={isRestarting || isCreating}
+                  size="sm"
+                  variant="outline"
+                  className="border-orange-600 text-orange-600 hover:bg-orange-600 hover:text-white"
+                >
+                  {isRestarting ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Restarting...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                      Restart
+                    </>
+                  )}
+                </Button>
+
+                {/* Deploy button - only show when ready */}
+                {currentProject.status === 'ready' && (
+                  <Button
+                    onClick={handleDeploy}
+                    disabled={isDeploying || isCreating}
+                    size="sm"
+                    className="bg-green-600 hover:bg-green-700"
+                  >
+                    {isDeploying ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Deploying...
+                      </>
+                    ) : (
+                      <>
+                        <Rocket className="h-4 w-4 mr-2" />
+                        Deploy
+                      </>
+                    )}
+                  </Button>
                 )}
-              </Button>
+              </div>
             )}
           </div>
 
@@ -705,6 +856,18 @@ export default function ProjectPage() {
                 <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
                 <span className="text-sm font-medium text-blue-900 dark:text-blue-100">
                   {currentStatus.message}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Restart Status Bar */}
+          {restartStatus && (
+            <div className="mt-2 p-2 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-md">
+              <div className="flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin text-orange-600" />
+                <span className="text-sm font-medium text-orange-900 dark:text-orange-100">
+                  {restartStatus.message}
                 </span>
               </div>
             </div>
