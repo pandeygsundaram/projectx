@@ -12,6 +12,8 @@ import {
   getProjectFileContent,
   deployProject,
   deployProjectStream,
+  restartProjectStream,
+  saveProjectSnapshot,
 } from '../controllers/project.controller';
 import { authenticateToken } from '../middleware/auth.middleware';
 
@@ -31,6 +33,7 @@ router.delete('/:id', deleteProject);
 // router.post('/:id/open', openProject); // DEPRECATED - use /open/stream instead
 router.post('/:id/open/stream', openProjectStream); // SSE streaming open/resume
 router.post('/:id/stop', stopProject);
+router.post('/:id/restart/stream', restartProjectStream); // SSE streaming restart/rebuild
 
 // File operations
 router.get('/:id/files', getProjectFiles); // Get file tree
@@ -39,5 +42,8 @@ router.get('/:id/file', getProjectFileContent); // Get file content with ?path=.
 // Deployment operations
 // router.post('/:id/deploy', deployProject); // DEPRECATED - use /deploy/stream instead
 router.post('/:id/deploy/stream', deployProjectStream); // SSE streaming deploy
+
+// Snapshot operations
+router.post('/:id/snapshot', saveProjectSnapshot); // Manual snapshot save
 
 export default router;

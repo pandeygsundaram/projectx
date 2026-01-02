@@ -41,8 +41,8 @@ export function CodeViewer({ filePath, content, isLoading }: CodeViewerProps) {
 
       {/* Code content */}
       <div className="flex-1 overflow-auto">
-        <pre className="p-4 text-sm font-mono leading-relaxed">
-          <code>{content}</code>
+        <pre className="p-4 text-sm font-mono leading-relaxed whitespace-pre overflow-x-auto">
+          <code className="block">{content}</code>
         </pre>
       </div>
     </div>

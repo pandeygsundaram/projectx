@@ -25,6 +25,8 @@ export interface ChatEventHandlers {
   onError?: (error: { message?: string; subtype?: string }) => void;
   onSession?: (sessionId: string) => void;
   onStatus?: (message: string) => void;
+  onLlmRequest?: (data: any) => void;
+  onLlmResponse?: (data: any) => void;
 }
 
 /**
@@ -34,7 +36,8 @@ export interface ChatEventHandlers {
 export async function sendChatMessage(
   token: string,
   chatMessage: ChatMessage,
-  handlers: ChatEventHandlers
+  handlers: ChatEventHandlers,
+  abortSignal?: AbortSignal
 ): Promise<void> {
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('📨 [CHAT API] Sending chat message');
@@ -52,6 +55,7 @@ export async function sendChatMessage(
       "Authorization": `Bearer ${token}`,
     },
     body: JSON.stringify(chatMessage),
+    signal: abortSignal,
   });
 
   console.log('📡 [CHAT API] Response status:', response.status, response.statusText);
@@ -132,6 +136,14 @@ export async function sendChatMessage(
                 case "status":
                   console.log('📊 [CHAT API] Status:', data.message);
                   handlers.onStatus?.(data.message);
+                  break;
+                case "llm_request":
+                  console.log('📤 [CHAT API] LLM Request:', data);
+                  handlers.onLlmRequest?.(data);
+                  break;
+                case "llm_response":
+                  console.log('📥 [CHAT API] LLM Response:', data);
+                  handlers.onLlmResponse?.(data);
                   break;
                 default:
                   console.warn('⚠️ [CHAT API] Unknown event type:', eventType);

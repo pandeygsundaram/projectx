@@ -233,21 +233,44 @@ export async function chatWithProject(req: Request, res: Response) {
 
         sendEvent('status', { message: 'Starting Gemini AI multi-agent system...' });
 
+        // Track if client disconnected
+        let clientDisconnected = false;
+        req.on('close', () => {
+          console.log('⏹️ [GEMINI] Client disconnected from SSE stream');
+          clientDisconnected = true;
+        });
+
         const result = await chatWithGemini({
           apiKey: geminiApiKey,
           projectId,
           projectPath: `/var/lib/rancher/k3s/storage/${projectId}/app`,
           gameType,
           userMessage: message,
-          conversationHistory: previousConversations.map(c => ({
-            role: c.role,
-            content: c.content,
-          })),
+          conversationHistory: previousConversations.map(c => {
+            const msg: any = {
+              role: c.role,
+              content: c.content,
+            };
+
+            // Include tool calls if present
+            if (c.toolCalls && Array.isArray(c.toolCalls)) {
+              msg.toolCalls = c.toolCalls;
+            }
+
+            return msg;
+          }),
           taskHistory: taskHistory.summary,
           onEvent: (event: string, data: any) => {
             sendEvent(event, data);
           },
+          abortSignal: () => clientDisconnected, // Check if client disconnected
         });
+
+        // Extract tool calls from the final conversation history
+        const lastMessages = result.conversationHistory.slice(-10); // Get last few messages
+        const toolCallsFromHistory = lastMessages
+          .filter(m => m.toolCalls && m.toolCalls.length > 0)
+          .flatMap(m => m.toolCalls || []);
 
         // Save assistant response with full conversation history
         await prisma.conversation.create({
@@ -256,6 +279,7 @@ export async function chatWithProject(req: Request, res: Response) {
             role: 'assistant',
             content: result.response || 'Task completed',
             provider: 'gemini',
+            ...(toolCallsFromHistory.length > 0 && { toolCalls: toolCallsFromHistory as any }),
           },
         });
         console.log('✅ [GEMINI] Response saved to database');

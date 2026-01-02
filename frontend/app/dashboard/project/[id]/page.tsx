@@ -7,11 +7,13 @@ import { useProjectStore } from "@/lib/stores/projectStore"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card } from "@/components/ui/card"
-import { Loader2, Send, Code, Monitor, X, RefreshCw, Rocket, ExternalLink, Wrench, Sparkles, Brain, Network } from "lucide-react"
+import { Loader2, Send, Code, Monitor, X, RefreshCw, Rocket, ExternalLink, Wrench, Sparkles, Brain, Network, Save, Square } from "lucide-react"
 import { motion } from "framer-motion"
 import type { Message, SSEStageEvent } from "@/types"
 import { FileTree, type FileNode } from "@/components/dashboard/FileTree"
 import { CodeViewer } from "@/components/dashboard/CodeViewer"
+import { ToastContainer, useToast } from "@/components/ui/toast"
+import { LLMVisualizer, type LLMCall } from "@/components/dashboard/LLMVisualizer"
 import axios from "axios"
 import { sendChatMessage, fetchConversations, type Conversation } from "@/lib/api/chat"
 
@@ -42,10 +44,12 @@ export default function ProjectPage() {
   const [isDeploying, setIsDeploying] = useState(false)
   const [deploymentUrl, setDeploymentUrl] = useState<string | null>(null)
   const [deployStatus, setDeployStatus] = useState<{stage: string; message: string} | null>(null)
-  const [aiProvider, setAiProvider] = useState<'claude' | 'gemini'>('claude')
-  const [multiAgentMode, setMultiAgentMode] = useState(false)
   const [isRestarting, setIsRestarting] = useState(false)
   const [restartStatus, setRestartStatus] = useState<{stage: string; message: string} | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
+  const [chatAbortController, setChatAbortController] = useState<AbortController | null>(null)
+  const { toasts, removeToast, toast } = useToast()
+  const [llmCalls, setLlmCalls] = useState<LLMCall[]>([])
 
   const projectId = params.id as string
   const isNewProject = projectId === "new"
@@ -419,6 +423,10 @@ export default function ProjectPage() {
     setIsChatting(true)
     setCurrentToolCall(null)
 
+    // Create abort controller for this chat
+    const abortController = new AbortController()
+    setChatAbortController(abortController)
+
     // Add user message
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -435,8 +443,8 @@ export default function ProjectPage() {
         {
           projectId: currentProject.id,
           message,
-          provider: aiProvider,
-          multiAgent: aiProvider === 'claude' ? multiAgentMode : true, // Gemini always multi-agent
+          provider: 'gemini',
+          multiAgent: true, // Gemini always uses multi-agent
         },
         {
           onStatus: (statusMessage) => {
@@ -463,11 +471,34 @@ export default function ProjectPage() {
           onTurn: (count) => {
             console.log("🔄 [UI Handler] Turn:", count)
           },
+          onLlmRequest: (data) => {
+            console.log("📤 [UI Handler] LLM Request:", data)
+            const llmCall: LLMCall = {
+              id: Date.now().toString() + Math.random(),
+              timestamp: data.timestamp,
+              type: 'request',
+              model: data.model,
+              request: data.request,
+            }
+            setLlmCalls((prev) => [...prev, llmCall])
+          },
+          onLlmResponse: (data) => {
+            console.log("📥 [UI Handler] LLM Response:", data)
+            const llmCall: LLMCall = {
+              id: Date.now().toString() + Math.random(),
+              timestamp: data.timestamp,
+              type: 'response',
+              response: data.response,
+              duration: data.duration,
+            }
+            setLlmCalls((prev) => [...prev, llmCall])
+          },
           onComplete: (result) => {
             console.log("✅ [UI Handler] Complete:", result)
             console.log("✅ [UI Handler] Setting chatting to false")
             setCurrentToolCall(null)
             setIsChatting(false)
+            setChatAbortController(null)
 
             // Refresh file tree if files were modified
             if (result.result.includes('write_file') || result.result.includes('Successfully wrote')) {
@@ -492,18 +523,44 @@ export default function ProjectPage() {
             addMessage(errorMessage)
             setIsChatting(false)
             setCurrentToolCall(null)
+            setChatAbortController(null)
           },
-        }
+        },
+        abortController.signal
       )
     } catch (error: any) {
       console.error("Failed to send chat message:", error)
-      const errorMessage: Message = {
-        id: Date.now().toString(),
-        role: "system",
-        content: `Failed to send message: ${error.message}`,
-        timestamp: new Date().toISOString(),
+
+      // Don't show error if it was aborted by user
+      if (error.name !== 'AbortError') {
+        const errorMessage: Message = {
+          id: Date.now().toString(),
+          role: "system",
+          content: `Failed to send message: ${error.message}`,
+          timestamp: new Date().toISOString(),
+        }
+        addMessage(errorMessage)
+      } else {
+        const abortMessage: Message = {
+          id: Date.now().toString(),
+          role: "system",
+          content: "⏹️ Conversation stopped by user",
+          timestamp: new Date().toISOString(),
+        }
+        addMessage(abortMessage)
       }
-      addMessage(errorMessage)
+
+      setIsChatting(false)
+      setCurrentToolCall(null)
+      setChatAbortController(null)
+    }
+  }
+
+  const handleStopChat = () => {
+    if (chatAbortController) {
+      console.log("⏹️ [UI] Stopping chat...")
+      chatAbortController.abort()
+      setChatAbortController(null)
       setIsChatting(false)
       setCurrentToolCall(null)
     }
@@ -513,10 +570,51 @@ export default function ProjectPage() {
     setIframeKey((prev) => prev + 1)
   }
 
-  const handleRefreshFiles = () => {
+  const handleRefreshFiles = async () => {
     console.log("🔄 [Manual Refresh] User requested file tree refresh")
-    setHasAttemptedFetch(false)
-    // The useEffect will trigger and fetch files
+
+    if (!token || !projectId || isNewProject) {
+      toast.error("Cannot refresh files: Invalid project")
+      return
+    }
+
+    setIsLoadingFiles(true)
+
+    try {
+      const url = `${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/files`
+      console.log("📡 [Manual Refresh] API URL:", url)
+
+      const response = await axios.get(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+
+      console.log("✅ [Manual Refresh] Response received:", response.status)
+
+      if (Array.isArray(response.data)) {
+        const filteredTree = filterFileTree(response.data)
+        setFileTree(filteredTree)
+        toast.success(`Files refreshed: ${filteredTree.length} items`)
+      } else {
+        toast.error("Invalid file tree format")
+        setFileTree([])
+      }
+    } catch (error: any) {
+      console.error("❌ [Manual Refresh] Error:", error)
+
+      if (error.response?.status === 400) {
+        toast.error("Pod not ready yet")
+      } else if (error.response?.status === 404) {
+        toast.error("Project not found")
+      } else if (error.response?.status === 500) {
+        toast.error("Pod not ready, please wait...")
+      } else {
+        toast.error("Failed to refresh files")
+      }
+
+      setFileTree([])
+    } finally {
+      setIsLoadingFiles(false)
+    }
   }
 
   const handleResumeProject = async () => {
@@ -676,6 +774,55 @@ export default function ProjectPage() {
     }
   }
 
+  const handleSaveProgress = async () => {
+    if (!token || !projectId) return
+
+    console.log("💾 [Save Progress] Saving project to R2...")
+    setIsSaving(true)
+
+    try {
+      const saveMessage: Message = {
+        id: Date.now().toString(),
+        role: "system",
+        content: "💾 Saving progress to R2...",
+        timestamp: new Date().toISOString(),
+      }
+      addMessage(saveMessage)
+
+      const response = await axios.post(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/projects/${projectId}/snapshot`,
+        {},
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      )
+
+      console.log("✅ [Save Progress] Snapshot saved:", response.data)
+
+      const successMessage: Message = {
+        id: Date.now().toString() + Math.random(),
+        role: "assistant",
+        content: `✅ Progress saved successfully to R2!`,
+        timestamp: new Date().toISOString(),
+      }
+      addMessage(successMessage)
+
+      setIsSaving(false)
+    } catch (error: any) {
+      console.error("❌ [Save Progress] Failed to save snapshot:", error)
+
+      const errorMessage: Message = {
+        id: Date.now().toString(),
+        role: "system",
+        content: `❌ Failed to save progress: ${error.response?.data?.error || error.message}`,
+        timestamp: new Date().toISOString(),
+      }
+      addMessage(errorMessage)
+
+      setIsSaving(false)
+    }
+  }
+
   const handleDeploy = async () => {
     if (!token || !projectId) return
 
@@ -786,7 +933,11 @@ export default function ProjectPage() {
   }
 
   return (
-    <div className="h-[calc(100vh-4rem)] flex">
+    <>
+      <ToastContainer toasts={toasts} onClose={removeToast} />
+      <div className="h-screen overflow-y-auto">
+        {/* Main Chat/Preview Section */}
+        <div className="h-screen flex">
       {/* Left Panel - Conversation */}
       <div className="w-full md:w-2/5 border-r flex flex-col bg-background">
         <div className="p-4 border-b">
@@ -803,6 +954,29 @@ export default function ProjectPage() {
             {/* Action Buttons */}
             {currentProject && !isNewProject && (
               <div className="flex gap-2">
+                {/* Save Progress button - only show when ready */}
+                {currentProject.status === 'ready' && (
+                  <Button
+                    onClick={handleSaveProgress}
+                    disabled={isSaving || isCreating}
+                    size="sm"
+                    variant="outline"
+                    className="border-purple-600 text-purple-600 hover:bg-purple-600 hover:text-white"
+                  >
+                    {isSaving ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Saving...
+                      </>
+                    ) : (
+                      <>
+                        <Save className="h-4 w-4 mr-2" />
+                        Save
+                      </>
+                    )}
+                  </Button>
+                )}
+
                 {/* Restart button - always visible */}
                 <Button
                   onClick={handleRestart}
@@ -961,58 +1135,6 @@ export default function ProjectPage() {
 
         {/* Input */}
         <div className="p-4 border-t">
-          {/* AI Provider Selector */}
-          <div className="mb-3 space-y-2">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground font-medium">AI Model:</span>
-                <div className="flex gap-1">
-                  <Button
-                    variant={aiProvider === 'claude' ? 'secondary' : 'ghost'}
-                    size="sm"
-                    onClick={() => setAiProvider('claude')}
-                    disabled={isCreating || isChatting}
-                  >
-                    <Sparkles className="h-4 w-4 mr-2" />
-                    Claude
-                  </Button>
-                  <Button
-                    variant={aiProvider === 'gemini' ? 'secondary' : 'ghost'}
-                    size="sm"
-                    onClick={() => setAiProvider('gemini')}
-                    disabled={isCreating || isChatting}
-                  >
-                    <Brain className="h-4 w-4 mr-2" />
-                    Gemini
-                  </Button>
-                </div>
-              </div>
-              <span className="text-xs text-muted-foreground">
-                {aiProvider === 'claude'
-                  ? (multiAgentMode ? 'Multi-agent mode' : 'Fast single-agent')
-                  : 'Multi-agent system'}
-              </span>
-            </div>
-
-            {/* Multi-Agent Toggle for Claude */}
-            {aiProvider === 'claude' && (
-              <div className="flex items-center gap-2 pl-2">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={multiAgentMode}
-                    onChange={(e) => setMultiAgentMode(e.target.checked)}
-                    disabled={isCreating || isChatting}
-                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500"
-                  />
-                  <span className="text-sm text-muted-foreground flex items-center gap-1.5">
-                    <Network className="h-3.5 w-3.5" />
-                    Enable multi-agent task planning
-                  </span>
-                </label>
-              </div>
-            )}
-          </div>
 
           <div className="flex gap-2">
             <Input
@@ -1023,20 +1145,29 @@ export default function ProjectPage() {
               }
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
-              onKeyPress={(e) => e.key === "Enter" && handleSendMessage()}
+              onKeyPress={(e) => e.key === "Enter" && !isChatting && handleSendMessage()}
               disabled={isCreating || isChatting}
             />
-            <Button
-              onClick={handleSendMessage}
-              disabled={!inputValue.trim() || isCreating || isChatting}
-              className="bg-blue-600 hover:bg-blue-700"
-            >
-              {(isCreating || isChatting) ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Send className="h-4 w-4" />
-              )}
-            </Button>
+            {isChatting ? (
+              <Button
+                onClick={handleStopChat}
+                className="bg-red-600 hover:bg-red-700"
+              >
+                <Square className="h-4 w-4" />
+              </Button>
+            ) : (
+              <Button
+                onClick={handleSendMessage}
+                disabled={!inputValue.trim() || isCreating}
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                {isCreating ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+              </Button>
+            )}
           </div>
         </div>
       </div>
@@ -1069,7 +1200,7 @@ export default function ProjectPage() {
               <RefreshCw className="h-4 w-4" />
             </Button>
           )}
-          {activeTab === "code" && (currentProject?.status === "ready" || currentProject?.status === "building") && (
+          {activeTab === "code" && (
             <Button
               variant="ghost"
               size="sm"
@@ -1145,5 +1276,12 @@ export default function ProjectPage() {
         </div>
       </div>
     </div>
+
+    {/* LLM Visualizer Section - Below chat */}
+    <div className="h-screen border-t">
+      <LLMVisualizer calls={llmCalls} />
+    </div>
+  </div>
+    </>
   )
 }

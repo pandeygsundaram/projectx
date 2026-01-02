@@ -31,6 +31,7 @@ export interface PodConfig {
   projectId: string;
   gitRepo?: string;
   template: '2d' | '3d';
+  skipAutoSetup?: boolean; // If true, pod starts but doesn't clone/install
 }
 
 const TEMPLATE_DIR_MAP: Record<'2d' | '3d', string> = {
@@ -39,9 +40,32 @@ const TEMPLATE_DIR_MAP: Record<'2d' | '3d', string> = {
 };
 
 export async function createProjectPod(config: PodConfig): Promise<string> {
-  const { projectId, gitRepo = DEFAULT_TEMPLATE_REPO, template } = config;
+  const { projectId, gitRepo = DEFAULT_TEMPLATE_REPO, template, skipAutoSetup = false } = config;
   const templateDir = TEMPLATE_DIR_MAP[template];
   const k8sName = toK8sName(projectId);
+
+  // Choose startup command based on skipAutoSetup
+  const startupArgs = skipAutoSetup
+    ? [
+        // Just setup environment and wait - we'll restore from snapshot manually
+        `echo "📦 Installing git and zip..." && \
+        apk add --no-cache git zip unzip && \
+        echo "⏳ Waiting for snapshot restore..." && \
+        mkdir -p /app/react-templete && \
+        tail -f /dev/null`,
+      ]
+    : [
+        // Normal flow: clone repo and start dev server
+        `echo "📦 Installing git..." && \
+        apk add --no-cache git zip unzip && \
+        echo "📥 Cloning repo..." && \
+        git clone ${gitRepo} /app && \
+        cd /app/react-templete && \
+        echo "📦 Installing dependencies..." && \
+        npm install && \
+        echo "🚀 Starting dev server..." && \
+        npm run dev -- --host 0.0.0.0 --port 5173`,
+      ];
 
   // Create Deployment
   const deployment: k8s.V1Deployment = {
@@ -70,17 +94,7 @@ export async function createProjectPod(config: PodConfig): Promise<string> {
               image: 'node:22-alpine',
               ports: [{ containerPort: 5173 }],
               command: ['/bin/sh', '-c'],
-              args: [
-                `echo "📦 Installing git..." && \
-                apk add --no-cache git && \
-                echo "📥 Cloning repo..." && \
-                git clone ${gitRepo} /app && \
-                cd /app/react-templete && \
-                echo "📦 Installing dependencies..." && \
-                npm install && \
-                echo "🚀 Starting dev server..." && \
-                npm run dev -- --host 0.0.0.0 --port 5173`,
-              ],
+              args: startupArgs,
             },
           ],
         },
@@ -135,19 +149,67 @@ export async function createProjectPod(config: PodConfig): Promise<string> {
   return `https://${k8sName}.${PREVIEW_DOMAIN}`;
 }
 
-export async function deleteProjectPod(projectId: string): Promise<void> {
+export async function deleteProjectPod(projectId: string, waitForDeletion: boolean = false): Promise<void> {
   const k8sName = toK8sName(projectId);
+
+  console.log(`🗑️  [DELETE] Deleting deployment ${k8sName}...`);
+
   try {
     await appsApi.deleteNamespacedDeployment({ name: k8sName, namespace: NAMESPACE });
-  } catch (e) {
-    // Ignore if not found
+    console.log(`✅ [DELETE] Deployment deletion initiated`);
+  } catch (e: any) {
+    if (e.response?.statusCode === 404) {
+      console.log(`⚠️  [DELETE] Deployment not found (already deleted)`);
+    } else {
+      console.error(`❌ [DELETE] Error deleting deployment:`, e.message);
+    }
   }
 
   try {
     await coreApi.deleteNamespacedService({ name: k8sName, namespace: NAMESPACE });
-  } catch (e) {
-    // Ignore if not found
+    console.log(`✅ [DELETE] Service deletion initiated`);
+  } catch (e: any) {
+    if (e.response?.statusCode === 404) {
+      console.log(`⚠️  [DELETE] Service not found (already deleted)`);
+    } else {
+      console.error(`❌ [DELETE] Error deleting service:`, e.message);
+    }
   }
+
+  // Wait for deletion to complete if requested
+  if (waitForDeletion) {
+    await waitForDeploymentDeleted(projectId);
+  }
+}
+
+/**
+ * Wait for deployment to be fully deleted
+ */
+export async function waitForDeploymentDeleted(projectId: string, maxWaitMs: number = 30000): Promise<boolean> {
+  const k8sName = toK8sName(projectId);
+  const startTime = Date.now();
+
+  console.log(`⏳ [DELETE] Waiting for deployment ${k8sName} to be fully deleted...`);
+
+  while (Date.now() - startTime < maxWaitMs) {
+    try {
+      await appsApi.readNamespacedDeployment({ name: k8sName, namespace: NAMESPACE });
+      // If we get here, deployment still exists
+      console.log(`   Still deleting... (${Math.round((Date.now() - startTime) / 1000)}s)`);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    } catch (error: any) {
+      if (error.response?.statusCode === 404) {
+        // Deployment is gone!
+        console.log(`✅ [DELETE] Deployment ${k8sName} fully deleted`);
+        return true;
+      }
+      // Other error, retry
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+  }
+
+  console.error(`❌ [DELETE] Deployment ${k8sName} did not delete in time`);
+  return false;
 }
 
 export async function getProjectPodStatus(projectId: string): Promise<string | null> {
@@ -393,8 +455,8 @@ export async function writeProjectFile(projectId: string, filePath: string, cont
     await execCommandInPod(projectId, ['mkdir', '-p', dirPath]);
 
     // Write file using cat with heredoc
-    const escapedContent = content.replace(/'/g, "'\\''");
-    await execCommandInPod(projectId, ['sh', '-c', `cat > '${fullPath}' << 'EOF'\n${escapedContent}\nEOF`]);
+    // No escaping needed because 'EOF' makes heredoc treat content literally
+    await execCommandInPod(projectId, ['sh', '-c', `cat > '${fullPath}' << 'EOF'\n${content}\nEOF`]);
   } catch (error: any) {
     console.error(`Failed to write file ${filePath}:`, error.message);
     throw new Error(`Failed to write file: ${error.message}`);
@@ -406,6 +468,74 @@ export async function writeProjectFile(projectId: string, filePath: string, cont
  */
 export async function executeInPod(projectId: string, command: string): Promise<string> {
   return execCommandInPod(projectId, ['sh', '-c', command]);
+}
+
+/**
+ * Wait for pod to be ready before executing commands
+ */
+export async function waitForPodReady(projectId: string, maxWaitMs: number = 60000): Promise<boolean> {
+  const k8sName = toK8sName(projectId);
+  const startTime = Date.now();
+
+  console.log(`⏳ [POD READY] Waiting for pod ${k8sName} to be ready...`);
+
+  while (Date.now() - startTime < maxWaitMs) {
+    try {
+      const pods = await coreApi.listNamespacedPod({
+        namespace: NAMESPACE,
+        labelSelector: `project=${k8sName}`,
+      });
+
+      if (pods.items.length > 0) {
+        const pod = pods.items[0];
+        const phase = pod.status?.phase;
+        const containerStatus = pod.status?.containerStatuses?.[0];
+
+        console.log(`   Pod phase: ${phase}, Container ready: ${containerStatus?.ready}`);
+
+        if (phase === 'Running' && containerStatus?.ready) {
+          console.log(`✅ [POD READY] Pod ${k8sName} is ready!`);
+          return true;
+        }
+      }
+
+      // Wait 2 seconds before checking again
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    } catch (error) {
+      console.log(`   Still waiting... (${Math.round((Date.now() - startTime) / 1000)}s)`);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+  }
+
+  console.error(`❌ [POD READY] Pod ${k8sName} did not become ready in time`);
+  return false;
+}
+
+/**
+ * Start the dev server in an already running pod
+ * Used after restoring from snapshot
+ */
+export async function startDevServer(projectId: string): Promise<void> {
+  try {
+    console.log(`🚀 [DEV SERVER] Starting dev server for ${projectId}...`);
+
+    // Ensure directory exists
+    await executeInPod(projectId, 'mkdir -p /app/react-templete').catch(() => {});
+
+    // Kill the tail process (that was keeping pod alive)
+    await executeInPod(projectId, 'pkill tail || true').catch(() => {});
+
+    // Start dev server in background
+    await executeInPod(
+      projectId,
+      'cd /app/react-templete && nohup npm run dev -- --host 0.0.0.0 --port 5173 > /tmp/vite.log 2>&1 &'
+    );
+
+    console.log(`✅ [DEV SERVER] Dev server started for ${projectId}`);
+  } catch (error: any) {
+    console.error(`❌ [DEV SERVER] Failed to start dev server for ${projectId}:`, error.message);
+    throw error;
+  }
 }
 
 // ========== DEPLOYMENT OPERATIONS ==========
@@ -435,58 +565,88 @@ export async function buildProject(projectId: string): Promise<string> {
       throw new Error('Pod name not found');
     }
 
-    // Run build command synchronously and save to log
-    const command = ['sh', '-c', `cd ${PROJECT_DIR} && npm run build 2>&1 | tee /tmp/build.log`];
+    // Run build command - we'll check the output for errors since Alpine sh doesn't support PIPESTATUS
+    const command = ['sh', '-c', `cd ${PROJECT_DIR} && npm run build 2>&1`];
 
-    const buildOutput = await new Promise<string>((resolve, reject) => {
-      let output = '';
+    let buildOutput = '';
 
-      execApi.exec(
-        NAMESPACE,
-        podName,
-        'react-dev',
-        command,
-        process.stdout as any,
-        process.stderr as any,
-        null as any,
-        false,
-        (status: any) => {
-          console.log(`📊 Build command completed with status:`, status.status);
+    try {
+      buildOutput = await new Promise<string>((resolve, reject) => {
+        let output = '';
 
-          if (status.status === 'Success') {
-            console.log(`✅ Build completed for ${k8sName}`);
+        execApi.exec(
+          NAMESPACE,
+          podName,
+          'react-dev',
+          command,
+          process.stdout as any,
+          process.stderr as any,
+          null as any,
+          false,
+          (status: any) => {
+            console.log(`📊 Build command completed with status:`, status.status);
+
+            // The status here just indicates if the shell command ran, not if build succeeded
             resolve(output);
-          } else {
-            console.error(`❌ Build failed for ${k8sName}`);
-            reject(new Error(output || 'Build command failed'));
           }
+        ).then((conn: any) => {
+          conn.on('data', (data: Buffer) => {
+            const chunk = data.toString();
+            output += chunk;
+            // Log in real-time
+            console.log('Build:', chunk.trim());
+          });
+
+          conn.on('error', (err: Error) => {
+            console.error('Build error:', err);
+          });
+        }).catch(reject);
+      });
+
+      // Check build output for actual success/failure indicators
+      const hasError = buildOutput.toLowerCase().includes('error during build') ||
+                      buildOutput.toLowerCase().includes('build failed') ||
+                      buildOutput.includes('✗ Build failed');
+
+      const hasSuccess = buildOutput.includes('✓ built in') ||
+                        (buildOutput.includes('built in') && !hasError);
+
+      if (hasError) {
+        console.error(`❌ Build FAILED for ${k8sName}`);
+        console.error('Build output shows errors');
+        throw new Error(`Build failed with errors:\n${buildOutput}`);
+      }
+
+      if (hasSuccess) {
+        console.log(`✅ Build SUCCESSFUL for ${k8sName}`);
+        return buildOutput;
+      }
+
+      // Check if dist directory was created with actual ls command
+      console.log('🔍 Checking if dist directory was created...');
+      try {
+        const lsOutput = await executeInPod(projectId, `ls -la ${PROJECT_DIR}/dist 2>&1`);
+        console.log(`📂 Dist directory contents:`, lsOutput.substring(0, 200));
+
+        // Check if output contains error
+        if (lsOutput.toLowerCase().includes('no such file or directory') ||
+            lsOutput.toLowerCase().includes('cannot access')) {
+          console.error(`❌ Build FAILED - dist directory not created`);
+          throw new Error(`Build failed - no dist directory created:\n${buildOutput}`);
         }
-      ).then((conn: any) => {
-        conn.on('data', (data: Buffer) => {
-          const chunk = data.toString();
-          output += chunk;
-          // Log in real-time
-          console.log('Build:', chunk.trim());
-        });
 
-        conn.on('error', (err: Error) => {
-          console.error('Build error:', err);
-        });
-      }).catch(reject);
-    });
+        console.log(`✅ Build successful - dist directory exists`);
+        return buildOutput;
+      } catch (error: any) {
+        console.error(`❌ Build FAILED - dist directory not created`);
+        console.error(`   Error:`, error.message);
+        throw new Error(`Build failed - no dist directory created:\n${buildOutput}`);
+      }
 
-    // Check if build was successful
-    if (buildOutput.includes('✓ built in') || buildOutput.includes('built in')) {
-      console.log(`✅ Build successful for ${k8sName}`);
-      return buildOutput;
+    } catch (error: any) {
+      console.error(`❌ Build execution failed for ${k8sName}:`, error.message);
+      throw error;
     }
-
-    // If we reach here, build might have failed
-    if (buildOutput.toLowerCase().includes('error') || buildOutput.toLowerCase().includes('failed')) {
-      throw new Error(`Build failed:\n${buildOutput}`);
-    }
-
-    return buildOutput;
   } catch (error: any) {
     console.error(`Failed to build project ${k8sName}:`, error.message);
     throw new Error(`Failed to build project: ${error.message}`);
@@ -534,6 +694,27 @@ export async function copyBuiltFilesFromPod(projectId: string): Promise<ProjectF
     fs.mkdirSync(tmpDir, { recursive: true });
 
     console.log(`📂 Created temp directory: ${tmpDir}`);
+
+    // First, verify dist directory exists in the pod with ls
+    console.log(`🔍 Checking if dist directory exists in pod...`);
+    try {
+      const lsOutput = await executeInPod(projectId, `ls -la ${PROJECT_DIR}/dist 2>&1`);
+
+      // Check if output contains error
+      if (lsOutput.toLowerCase().includes('no such file or directory') ||
+          lsOutput.toLowerCase().includes('cannot access')) {
+        console.error(`❌ Dist directory does NOT exist in pod`);
+        console.error(`   ls output:`, lsOutput);
+        throw new Error('Build failed - dist directory not found in pod. Run build first!');
+      }
+
+      console.log(`✅ Dist directory exists in pod`);
+      console.log(`   Contents preview:`, lsOutput.substring(0, 200));
+    } catch (error: any) {
+      console.error(`❌ Dist directory does NOT exist in pod`);
+      console.error(`   Error:`, error.message);
+      throw new Error('Build failed - dist directory not found in pod. Run build first!');
+    }
 
     // Use kubectl cp via exec command (more reliable than k8s API)
     const { exec } = require('child_process');

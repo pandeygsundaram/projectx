@@ -11,9 +11,11 @@ import {
   readProjectFile,
   buildProject,
   copyBuiltFilesFromPod,
+  startDevServer,
+  waitForPodReady,
 } from '../services/kubernetes';
 import { uploadDeployment } from '../utils/r2Storage';
-import { restoreProjectSnapshot, hasProjectSnapshots } from '../services/snapshot';
+import { restoreProjectSnapshot, hasProjectSnapshots, createProjectSnapshot } from '../services/snapshot';
 
 const PREVIEW_DOMAIN = 'projects.samosa.wtf';
 const STREAM_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
@@ -150,11 +152,14 @@ export const openProject = async (req: Request, res: Response) => {
       });
     }
 
+    // Check if there's a snapshot BEFORE creating pod
+    const hasSnapshot = await hasProjectSnapshots(project.id);
+
     // Start the pod
-    // For now, we'll use the default template. Later, we'll pull from R2
     const previewUrl = await createProjectPod({
       projectId: project.id,
-        template: project.gameType as '2d' | '3d',
+      template: project.gameType as '2d' | '3d',
+      skipAutoSetup: hasSnapshot // Skip git clone if we have snapshot
     });
 
     await prisma.project.update({
@@ -166,6 +171,26 @@ export const openProject = async (req: Request, res: Response) => {
         lastActivityAt: new Date(),
       },
     });
+
+    // If snapshot exists, restore it then start dev server
+    if (hasSnapshot) {
+      console.log(`📥 [START] Restoring project ${project.id} from snapshot...`);
+
+      try {
+        const restored = await restoreProjectSnapshot(project.id);
+        if (restored) {
+          console.log(`✅ [START] Project ${project.id} restored from snapshot`);
+
+          // Start the dev server
+          await startDevServer(project.id);
+
+          console.log(`✅ [START] Dev server started for ${project.id}`);
+        }
+      } catch (snapshotError) {
+        console.error(`⚠️  [START] Failed to restore snapshot for ${project.id}:`, snapshotError);
+        // Continue without snapshot - pod will use fresh template
+      }
+    }
 
     res.status(200).json({
       project: {
@@ -513,6 +538,12 @@ export const openProjectStream = async (req: Request, res: Response) => {
   const userId = (req as any).userId;
   const { id } = req.params;
 
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('🔄 [OPEN PROJECT] Resume/Open request received');
+  console.log('   User ID:', userId);
+  console.log('   Project ID:', id);
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
   // Set SSE headers
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -520,17 +551,26 @@ export const openProjectStream = async (req: Request, res: Response) => {
   res.flushHeaders();
 
   // Find the project
+  console.log('🔍 [OPEN PROJECT] Looking up project in database...');
   const project = await prisma.project.findFirst({
     where: { id, userId, deletedAt: null },
   });
 
   if (!project) {
+    console.log('❌ [OPEN PROJECT] Project not found');
     sendSSE(res, 'error', { error: 'Project not found' });
     return res.end();
   }
 
+  console.log('✅ [OPEN PROJECT] Project found:');
+  console.log('   Name:', project.name);
+  console.log('   Status:', project.status);
+  console.log('   Game Type:', project.gameType);
+  console.log('   Last Activity:', project.lastActivityAt);
+
   // Check if already running
   if (['initializing', 'building', 'ready'].includes(project.status)) {
+    console.log('⚠️  [OPEN PROJECT] Project is already running - skipping resume');
     sendSSE(res, 'stage', {
       stage: 'ready',
       message: 'Project is already running',
@@ -541,8 +581,10 @@ export const openProjectStream = async (req: Request, res: Response) => {
   }
 
   // Check if user has another active pod
+  console.log('🔍 [OPEN PROJECT] Checking for other active pods...');
   const activePod = await getUserActivePod(userId);
   if (activePod && activePod.id !== id) {
+    console.log('❌ [OPEN PROJECT] User has another active pod:', activePod.id);
     sendSSE(res, 'error', {
       error: 'You already have another project running',
       activeProject: {
@@ -553,13 +595,29 @@ export const openProjectStream = async (req: Request, res: Response) => {
     });
     return res.end();
   }
+  console.log('✅ [OPEN PROJECT] No other active pods found');
 
-  sendSSE(res, 'stage', { stage: 'deploying', message: 'Starting project...' });
+  // Check if there's a snapshot BEFORE creating pod
+  console.log('🔍 [OPEN PROJECT] Checking for snapshots...');
+  const hasSnapshot = await hasProjectSnapshots(project.id);
+  console.log(`${hasSnapshot ? '✅' : '⚠️ '} [OPEN PROJECT] Snapshot ${hasSnapshot ? 'FOUND' : 'NOT FOUND'}`);
+
+  sendSSE(res, 'stage', { stage: 'deploying', message: hasSnapshot ? 'Starting pod for snapshot restore...' : 'Starting project...' });
 
   // Start the pod
   try {
-    await createProjectPod({ projectId: project.id ,   template: project.gameType as '2d' | '3d',});
+    console.log('🚀 [OPEN PROJECT] Creating Kubernetes pod...');
+    console.log(`   Skip Auto Setup: ${hasSnapshot ? 'YES (will restore from snapshot)' : 'NO (fresh git clone)'}`);
 
+    // If snapshot exists, create pod without auto-setup so we can restore first
+    await createProjectPod({
+      projectId: project.id,
+      template: project.gameType as '2d' | '3d',
+      skipAutoSetup: hasSnapshot // Skip git clone if we have snapshot
+    });
+    console.log('✅ [OPEN PROJECT] Pod created successfully');
+
+    console.log('💾 [OPEN PROJECT] Updating project status to "building"...');
     await prisma.project.update({
       where: { id: project.id },
       data: {
@@ -569,26 +627,55 @@ export const openProjectStream = async (req: Request, res: Response) => {
         lastActivityAt: new Date(),
       },
     });
+    console.log('✅ [OPEN PROJECT] Project status updated');
 
-    // Check if there's a snapshot to restore
-    const hasSnapshot = await hasProjectSnapshots(project.id);
+    // If snapshot exists, restore it then start dev server
     if (hasSnapshot) {
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('📥 [SNAPSHOT RESTORE] Starting snapshot restoration process...');
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+      // Wait for pod to be ready before restoring
+      sendSSE(res, 'stage', { stage: 'installing_deps', message: 'Waiting for pod to be ready...' });
+      const podReady = await waitForPodReady(project.id);
+
+      if (!podReady) {
+        console.error('❌ [SNAPSHOT RESTORE] Pod did not become ready in time');
+        sendSSE(res, 'error', { error: 'Pod startup timeout' });
+        return res.end();
+      }
+
       sendSSE(res, 'stage', { stage: 'installing_deps', message: 'Restoring from snapshot...' });
-      console.log(`📥 [RESUME] Restoring project ${project.id} from snapshot...`);
 
       try {
         const restored = await restoreProjectSnapshot(project.id);
         if (restored) {
-          console.log(`✅ [RESUME] Project ${project.id} restored from snapshot`);
-          sendSSE(res, 'stage', { stage: 'installing_deps', message: 'Snapshot restored, starting project...' });
+          console.log('✅ [SNAPSHOT RESTORE] Snapshot restored successfully');
+          sendSSE(res, 'stage', { stage: 'installing_deps', message: 'Snapshot restored, starting dev server...' });
+
+          console.log('🚀 [DEV SERVER] Starting Vite dev server...');
+          // Start the dev server
+          await startDevServer(project.id);
+
+          console.log('✅ [DEV SERVER] Dev server started successfully');
+          console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
         }
       } catch (snapshotError) {
-        console.error(`⚠️  [RESUME] Failed to restore snapshot for ${project.id}:`, snapshotError);
+        console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        console.error('❌ [SNAPSHOT RESTORE] Snapshot restoration FAILED');
+        console.error('   Error:', snapshotError);
+        console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
         sendSSE(res, 'stage', { stage: 'installing_deps', message: 'Snapshot restore failed, using default template...' });
         // Continue without snapshot
       }
+    } else {
+      console.log('⚠️  [OPEN PROJECT] No snapshot found - pod will use fresh template from git');
     }
   } catch (error) {
+    console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.error('❌ [OPEN PROJECT] Pod creation FAILED');
+    console.error('   Error:', error);
+    console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     await prisma.project.update({
       where: { id: project.id },
       data: { status: 'error' },
@@ -865,4 +952,249 @@ export const deployProjectStream = async (req: Request, res: Response) => {
   req.on('close', () => {
     console.log('Client disconnected from deployment stream');
   });
+};
+
+// Restart/rebuild project pod with SSE streaming
+export const restartProjectStream = async (req: Request, res: Response) => {
+  const userId = (req as any).userId;
+  const { id } = req.params;
+
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('🔄 [RESTART PROJECT] Restart request received');
+  console.log('   User ID:', userId);
+  console.log('   Project ID:', id);
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+  // Set SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  try {
+    // Find the project
+    console.log('🔍 [RESTART PROJECT] Looking up project in database...');
+    const project = await prisma.project.findFirst({
+      where: { id, userId, deletedAt: null },
+    });
+
+    if (!project) {
+      console.log('❌ [RESTART PROJECT] Project not found');
+      sendSSE(res, 'error', { error: 'Project not found' });
+      return res.end();
+    }
+
+    console.log('✅ [RESTART PROJECT] Project found:');
+    console.log('   Name:', project.name);
+    console.log('   Status:', project.status);
+    console.log('   Game Type:', project.gameType);
+
+    // Step 1: If pod is running, save current state to R2 BEFORE stopping
+    if (['initializing', 'building', 'ready'].includes(project.status)) {
+      console.log('💾 [RESTART PROJECT] Pod is running - creating snapshot of current state...');
+      sendSSE(res, 'stage', { stage: 'saving', message: 'Saving current project state to R2...' });
+
+      try {
+        // Wait for pod to be ready before creating snapshot
+        const podReady = await waitForPodReady(project.id, 30000);
+
+        if (podReady) {
+          const snapshotId = await createProjectSnapshot(project.id);
+          console.log(`✅ [RESTART PROJECT] Snapshot created: ${snapshotId}`);
+          sendSSE(res, 'stage', { stage: 'saving', message: 'Project state saved to R2' });
+        } else {
+          console.log('⚠️  [RESTART PROJECT] Pod not ready, skipping snapshot creation');
+        }
+      } catch (snapshotError: any) {
+        console.error('⚠️  [RESTART PROJECT] Failed to create snapshot:', snapshotError.message);
+        // Continue with restart even if snapshot fails
+      }
+    } else {
+      // Pod is dead (error, hibernated, deleted) - skip snapshot
+      console.log(`⏭️  [RESTART PROJECT] Pod status is '${project.status}' - skipping snapshot creation`);
+      sendSSE(res, 'stage', { stage: 'restarting', message: `Pod is ${project.status}, restoring from previous snapshot...` });
+    }
+
+    // Step 2: Stop the pod and wait for it to be fully deleted
+    console.log('🛑 [RESTART PROJECT] Stopping existing pod...');
+    sendSSE(res, 'stage', { stage: 'stopping', message: 'Stopping current pod...' });
+
+    // Wait for deletion to complete to avoid 409 AlreadyExists error
+    await deleteProjectPod(project.id, true);
+
+    await prisma.project.update({
+      where: { id: project.id },
+      data: {
+        status: 'hibernated',
+        podName: null,
+        serviceName: null,
+      },
+    });
+    console.log('✅ [RESTART PROJECT] Pod stopped and fully deleted');
+
+    // Step 3: Check if there's a snapshot (should always be true now after saving)
+    console.log('🔍 [RESTART PROJECT] Checking for snapshots...');
+    const hasSnapshot = await hasProjectSnapshots(project.id);
+    console.log(`${hasSnapshot ? '✅' : '⚠️ '} [RESTART PROJECT] Snapshot ${hasSnapshot ? 'FOUND' : 'NOT FOUND'}`);
+
+    sendSSE(res, 'stage', { stage: 'restarting', message: hasSnapshot ? 'Restarting pod for snapshot restore...' : 'Restarting project...' });
+
+    // Step 4: Create the pod again (always skip auto setup since we restore from R2)
+    console.log('🚀 [RESTART PROJECT] Creating new Kubernetes pod...');
+    console.log(`   Skip Auto Setup: YES (will restore from R2 snapshot)`);
+
+    await createProjectPod({
+      projectId: project.id,
+      template: project.gameType as '2d' | '3d',
+      skipAutoSetup: true // Always skip - we restore from R2
+    });
+    console.log('✅ [RESTART PROJECT] Pod created successfully');
+
+    console.log('💾 [RESTART PROJECT] Updating project status to "building"...');
+    await prisma.project.update({
+      where: { id: project.id },
+      data: {
+        status: 'building',
+        podName: project.id,
+        serviceName: project.id,
+        lastActivityAt: new Date(),
+      },
+    });
+    console.log('✅ [RESTART PROJECT] Project status updated');
+
+    // Step 5: Restore from R2 snapshot and start dev server
+    if (hasSnapshot) {
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('📥 [R2 RESTORE] Restoring project from R2 snapshot...');
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      // Wait for pod to be ready before restoring
+      sendSSE(res, 'stage', { stage: 'installing_deps', message: 'Waiting for pod to be ready...' });
+      const podReady = await waitForPodReady(project.id);
+
+      if (!podReady) {
+        console.error('❌ [R2 RESTORE] Pod did not become ready in time');
+        sendSSE(res, 'error', { error: 'Pod startup timeout' });
+        return res.end();
+      }
+
+      sendSSE(res, 'stage', { stage: 'installing_deps', message: 'Restoring from R2 snapshot...' });
+
+      try {
+        const restored = await restoreProjectSnapshot(project.id);
+        if (restored) {
+          console.log('✅ [R2 RESTORE] Project restored from R2 successfully');
+          sendSSE(res, 'stage', { stage: 'installing_deps', message: 'R2 snapshot restored, starting dev server...' });
+
+          console.log('🚀 [DEV SERVER] Starting Vite dev server...');
+          await startDevServer(project.id);
+
+          console.log('✅ [DEV SERVER] Dev server started successfully');
+
+          // Wait a bit for dev server to start
+          console.log('⏳ [DEV SERVER] Waiting for dev server to be ready...');
+          await new Promise(resolve => setTimeout(resolve, 5000));
+
+          // Update project status to ready
+          await prisma.project.update({
+            where: { id: project.id },
+            data: { status: 'ready' },
+          });
+          console.log('✅ [RESTART PROJECT] Project status updated to READY');
+
+          const previewUrl = getPreviewUrl(project.id);
+
+          // Send ready event to frontend
+          sendSSE(res, 'stage', {
+            stage: 'ready',
+            message: 'Project restarted successfully!',
+            previewUrl,
+            projectId: project.id,
+          });
+
+          console.log('✅ [RESTART PROJECT] Restart completed successfully');
+          console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+          res.end();
+          return;
+        }
+      } catch (snapshotError) {
+        console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        console.error('❌ [R2 RESTORE] Snapshot restoration FAILED');
+        console.error('   Error:', snapshotError);
+        console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        sendSSE(res, 'error', { error: 'Failed to restore from R2 snapshot' });
+        return res.end();
+      }
+    } else {
+      console.error('❌ [RESTART PROJECT] No snapshot found - cannot restart!');
+      sendSSE(res, 'error', { error: 'No snapshot found to restore from' });
+      return res.end();
+    }
+
+  } catch (error) {
+    console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.error('❌ [RESTART PROJECT] Restart FAILED');
+    console.error('   Error:', error);
+    console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+    // Try to update project status, but don't fail if it errors
+    try {
+      await prisma.project.update({
+        where: { id },
+        data: { status: 'error' },
+      });
+    } catch (dbError) {
+      console.error('Failed to update project status:', dbError);
+    }
+
+    sendSSE(res, 'error', { error: 'Failed to restart project' });
+    res.end();
+  }
+
+  // Handle client disconnect
+  req.on('close', () => {
+    console.log('Client disconnected from restart stream');
+  });
+};
+
+// Save current project state to R2 (manual snapshot)
+export const saveProjectSnapshot = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).userId;
+    const { id } = req.params;
+
+    // Verify project ownership
+    const project = await prisma.project.findFirst({
+      where: { id, userId, deletedAt: null },
+    });
+
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    // Check if project is running
+    if (!['building', 'ready'].includes(project.status)) {
+      return res.status(400).json({
+        error: 'Project must be running to save snapshot',
+      });
+    }
+
+    console.log('💾 [MANUAL SNAPSHOT] Creating snapshot for project:', id);
+
+    // Create snapshot
+    const snapshotId = await createProjectSnapshot(id);
+
+    console.log('✅ [MANUAL SNAPSHOT] Snapshot created successfully:', snapshotId);
+
+    res.status(200).json({
+      message: 'Progress saved successfully',
+      snapshotId,
+    });
+  } catch (error: any) {
+    console.error('❌ [MANUAL SNAPSHOT] Failed to save snapshot:', error);
+    res.status(500).json({
+      error: 'Failed to save progress',
+      details: error.message,
+    });
+  }
 };
