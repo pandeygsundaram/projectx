@@ -13,7 +13,6 @@ import type { Message, SSEStageEvent } from "@/types"
 import { FileTree, type FileNode } from "@/components/dashboard/FileTree"
 import { CodeViewer } from "@/components/dashboard/CodeViewer"
 import { ToastContainer, useToast } from "@/components/ui/toast"
-import { LLMVisualizer, type LLMCall } from "@/components/dashboard/LLMVisualizer"
 import axios from "axios"
 import { sendChatMessage, fetchConversations, type Conversation } from "@/lib/api/chat"
 
@@ -49,12 +48,11 @@ export default function ProjectPage() {
   const [isSaving, setIsSaving] = useState(false)
   const [chatAbortController, setChatAbortController] = useState<AbortController | null>(null)
   const { toasts, removeToast, toast } = useToast()
-  const [llmCalls, setLlmCalls] = useState<LLMCall[]>([])
 
   const projectId = params.id as string
   const isNewProject = projectId === "new"
   const projectName = searchParams.get("name")
-  const gameType = (searchParams.get("gameType") as '2d' | '3d') || '3d'
+  const gameType = (searchParams.get("gameType") as '2d' | '3d') || '2d'
 
   useEffect(() => {
     console.log("🔵 [Main Effect] Triggered", {
@@ -473,25 +471,9 @@ export default function ProjectPage() {
           },
           onLlmRequest: (data) => {
             console.log("📤 [UI Handler] LLM Request:", data)
-            const llmCall: LLMCall = {
-              id: Date.now().toString() + Math.random(),
-              timestamp: data.timestamp,
-              type: 'request',
-              model: data.model,
-              request: data.request,
-            }
-            setLlmCalls((prev) => [...prev, llmCall])
           },
           onLlmResponse: (data) => {
             console.log("📥 [UI Handler] LLM Response:", data)
-            const llmCall: LLMCall = {
-              id: Date.now().toString() + Math.random(),
-              timestamp: data.timestamp,
-              type: 'response',
-              response: data.response,
-              duration: data.duration,
-            }
-            setLlmCalls((prev) => [...prev, llmCall])
           },
           onComplete: (result) => {
             console.log("✅ [UI Handler] Complete:", result)
@@ -961,7 +943,7 @@ export default function ProjectPage() {
                     disabled={isSaving || isCreating}
                     size="sm"
                     variant="outline"
-                    className="border-purple-600 text-purple-600 hover:bg-purple-600 hover:text-white"
+                    className="border-primary text-foreground hover:bg-primary hover:text-primary-foreground"
                   >
                     {isSaving ? (
                       <>
@@ -1004,7 +986,7 @@ export default function ProjectPage() {
                     onClick={handleDeploy}
                     disabled={isDeploying || isCreating}
                     size="sm"
-                    className="bg-green-600 hover:bg-green-700"
+                    className="bg-primary text-primary-foreground hover:bg-primary/90"
                   >
                     {isDeploying ? (
                       <>
@@ -1025,10 +1007,10 @@ export default function ProjectPage() {
 
           {/* Live Status Bar */}
           {currentStatus && (
-            <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md">
+            <div className="mt-2 p-2 bg-muted border border-border rounded-md">
               <div className="flex items-center gap-2">
-                <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
-                <span className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                <Loader2 className="h-4 w-4 animate-spin text-foreground" />
+                <span className="text-sm font-medium text-foreground">
                   {currentStatus.message}
                 </span>
               </div>
@@ -1094,9 +1076,9 @@ export default function ProjectPage() {
               <div
                 className={`max-w-[80%] rounded-lg px-4 py-2 ${
                   message.role === "user"
-                    ? "bg-blue-600 text-white"
+                    ? "bg-primary text-primary-foreground"
                     : message.role === "system"
-                    ? "bg-yellow-100 dark:bg-yellow-900/20 text-foreground border"
+                    ? "bg-muted text-foreground border"
                     : "bg-muted text-foreground"
                 }`}
               >
@@ -1121,9 +1103,9 @@ export default function ProjectPage() {
 
           {currentToolCall && (
             <div className="flex justify-start">
-              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg px-4 py-2 flex items-center gap-2">
-                <Wrench className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                <span className="text-sm text-blue-900 dark:text-blue-100">
+              <div className="bg-muted border border-border rounded-lg px-4 py-2 flex items-center gap-2">
+                <Wrench className="h-4 w-4 text-foreground" />
+                <span className="text-sm text-foreground">
                   {currentToolCall}
                 </span>
               </div>
@@ -1159,7 +1141,7 @@ export default function ProjectPage() {
               <Button
                 onClick={handleSendMessage}
                 disabled={!inputValue.trim() || isCreating}
-                className="bg-blue-600 hover:bg-blue-700"
+                className="bg-primary text-primary-foreground hover:bg-primary/90"
               >
                 {isCreating ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -1228,7 +1210,7 @@ export default function ProjectPage() {
                 <div className="text-center space-y-2">
                   {isCreating ? (
                     <>
-                      <Loader2 className="h-12 w-12 animate-spin text-blue-600 mx-auto" />
+                      <Loader2 className="h-12 w-12 animate-spin text-foreground mx-auto" />
                       <p className="text-muted-foreground">Building your project...</p>
                     </>
                   ) : (
@@ -1248,7 +1230,7 @@ export default function ProjectPage() {
               <div className="w-1/3 border-r overflow-y-auto bg-card">
                 {isLoadingFiles ? (
                   <div className="flex items-center justify-center p-4">
-                    <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
+                    <Loader2 className="h-6 w-6 animate-spin text-foreground" />
                   </div>
                 ) : fileTree.length === 0 ? (
                   <div className="p-4 text-sm text-muted-foreground text-center">
@@ -1275,11 +1257,6 @@ export default function ProjectPage() {
           )}
         </div>
       </div>
-    </div>
-
-    {/* LLM Visualizer Section - Below chat */}
-    <div className="h-screen border-t">
-      <LLMVisualizer calls={llmCalls} />
     </div>
   </div>
     </>

@@ -1,35 +1,54 @@
 "use client"
 
 import { Moon, Sun } from "lucide-react"
-import { motion } from "framer-motion"
+import { motion, AnimatePresence } from "framer-motion"
 import { useTheme } from "@/components/providers/theme-provider"
 import { Button } from "@/components/ui/button"
-import { useState } from "react"
 
 export function ThemeToggle() {
   const { theme, setTheme } = useTheme()
-  const [rotation, setRotation] = useState(0)
 
   const toggleTheme = () => {
     setTheme(theme === "light" ? "dark" : "light")
-    setRotation(rotation + 360)
   }
 
   return (
-    <motion.div
-      animate={{ rotate: rotation }}
-      transition={{ duration: 0.8, ease: "easeInOut" }}
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={toggleTheme}
+      className="relative overflow-hidden"
     >
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={toggleTheme}
-        className="relative"
-      >
-        <Sun className="h-[1.2rem] w-[1.2rem] rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0 absolute" />
-        <Moon className="h-[1.2rem] w-[1.2rem] rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100 absolute" />
-        <span className="sr-only">Toggle theme</span>
-      </Button>
-    </motion.div>
+      <div className="relative w-[1.2rem] h-[1.2rem]" style={{ perspective: "1000px" }}>
+        <AnimatePresence mode="wait" initial={false}>
+          {theme === "dark" ? (
+            <motion.div
+              key="moon"
+              initial={{ rotateY: 90, opacity: 0 }}
+              animate={{ rotateY: 0, opacity: 1 }}
+              exit={{ rotateY: -90, opacity: 0 }}
+              transition={{ duration: 0.3, ease: "easeInOut" }}
+              style={{ transformStyle: "preserve-3d" }}
+              className="absolute inset-0"
+            >
+              <Moon className="h-[1.2rem] w-[1.2rem]" />
+            </motion.div>
+          ) : (
+            <motion.div
+              key="sun"
+              initial={{ rotateY: 90, opacity: 0 }}
+              animate={{ rotateY: 0, opacity: 1 }}
+              exit={{ rotateY: -90, opacity: 0 }}
+              transition={{ duration: 0.3, ease: "easeInOut" }}
+              style={{ transformStyle: "preserve-3d" }}
+              className="absolute inset-0"
+            >
+              <Sun className="h-[1.2rem] w-[1.2rem]" />
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+      <span className="sr-only">Toggle theme</span>
+    </Button>
   )
 }

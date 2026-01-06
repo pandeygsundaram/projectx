@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useRef, useState } from "react";
-import { Rocket, ExternalLink } from "lucide-react";
+import { ExternalLink, Gamepad2 } from "lucide-react";
+import Image from "next/image";
 
 const showcaseProjects = [
   {
@@ -9,12 +10,14 @@ const showcaseProjects = [
     description: "An innovative 3D experience built with our AI-native game engine",
     url: "https://pub-18b55177615f46d3a53f3d84747d7f02.r2.dev/deployments/f4d6f3ed-1b7f-47f5-ab45-0fc6b06c9217/dist/index.html",
     gradient: "from-purple-500/20 via-pink-500/20 to-red-500/20",
+    image: "/image.png",
   },
   {
     title: "Project Beta",
     description: "A cutting-edge interactive game showcasing real-time AI mechanics",
     url: "https://pub-18b55177615f46d3a53f3d84747d7f02.r2.dev/deployments/2204f0b7-6d0f-4de0-950f-5cd8e531475a/dist/index.html",
     gradient: "from-blue-500/20 via-cyan-500/20 to-teal-500/20",
+    image: "/image2.png",
   },
 ];
 
@@ -58,7 +61,7 @@ export const ProjectShowcase = () => {
       <div className="container mx-auto px-6 relative z-10">
         <div className="mb-16 max-w-2xl mx-auto text-center">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-[10px] font-medium text-primary mb-6 uppercase tracking-wider">
-            <Rocket className="w-3 h-3" />
+            <Gamepad2 className="w-3 h-3" />
             <span>Built With Hitbox</span>
           </div>
           <h2 className="text-3xl md:text-5xl font-bold mb-4 tracking-tight text-white">
@@ -81,11 +84,13 @@ export const ProjectShowcase = () => {
               >
                 {/* Project Visual Preview */}
                 <div className={`relative w-full h-48 mb-6 rounded-lg overflow-hidden bg-gradient-to-br ${project.gradient} border border-white/10`}>
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="w-24 h-24 rounded-lg border border-primary/40 bg-primary/5 flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
-                      <Rocket className="w-12 h-12 text-primary" />
-                    </div>
-                  </div>
+                  <Image
+                    src={`${project.image}?v=${Date.now()}`}
+                    alt={project.title}
+                    fill
+                    className="object-cover group-hover:scale-105 transition-transform duration-500"
+                    unoptimized
+                  />
                   <div className="absolute inset-0 bg-gradient-to-t from-zinc-900 via-transparent to-transparent opacity-60"></div>
                 </div>
 

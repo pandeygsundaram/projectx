@@ -4,7 +4,7 @@ import { ProtectedRoute } from "@/components/auth/ProtectedRoute"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { Button } from "@/components/ui/button"
 import { ThemeToggle } from "@/components/ui/theme-toggle"
-import { LogOut, Folder } from "lucide-react"
+import { LogOut, Folder, Gamepad2 } from "lucide-react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 
@@ -28,8 +28,11 @@ export default function DashboardLayout({
         <header className="border-b bg-card/50 backdrop-blur-lg sticky top-0 z-40">
           <div className="container mx-auto px-6 h-16 flex items-center justify-between">
             <div className="flex items-center gap-6">
-              <Link href="/dashboard" className="text-xl font-bold">
-                <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+              <Link href="/dashboard" className="flex items-center gap-2 group">
+                <div className="bg-primary/10 p-2 rounded-lg border border-primary/20 group-hover:border-primary/50 group-hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] transition-all duration-300">
+                  <Gamepad2 className="h-5 w-5 text-primary" />
+                </div>
+                <span className="text-lg font-bold tracking-tight text-foreground">
                   HitBox
                 </span>
               </Link>
