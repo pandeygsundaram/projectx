@@ -176,7 +176,7 @@ export class GeminiChatService {
         case 'write_file': {
           await writeProjectFile(this.projectId, args.path, args.content);
           const lines = args.content.split('\n').length;
-          return `✅ Successfully wrote ${lines} lines to ${args.path}`;
+          return `Successfully wrote ${lines} lines to ${args.path}`;
         }
 
         case 'list_files': {
@@ -205,7 +205,7 @@ export class GeminiChatService {
             line.toLowerCase().includes('cannot find')
           );
 
-          return `Pod logs (last ${seconds} seconds):\n\`\`\`\n${logs}\n\`\`\`\n\n${hasErrors ? '⚠️ ERRORS DETECTED - Please fix these issues!' : '✅ No errors detected'}`;
+          return `Pod logs (last ${seconds} seconds):\n\`\`\`\n${logs}\n\`\`\`\n\n${hasErrors ? 'ERRORS DETECTED - Please fix these issues!' : 'No errors detected'}`;
         }
 
         case 'execute_command': {
@@ -301,7 +301,7 @@ export class GeminiChatService {
       while (iteration < maxIterations) {
         // Check if client disconnected
         if (this.abortSignal()) {
-          console.log('⏹️ [GEMINI] Client disconnected - aborting execution');
+          console.log('[GEMINI] Client disconnected - aborting execution');
           this.onEvent('status', { message: 'Execution stopped by user' });
           break;
         }

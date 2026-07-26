@@ -161,9 +161,9 @@ Create the task plan:`;
         tasks: this.taskGraph.tasks.map(t => ({ id: t.id, description: t.description })),
       });
 
-      console.log(`📋 [CLAUDE MA] Planned ${this.taskGraph.tasks.length} tasks`);
+      console.log(`[CLAUDE MA] Planned ${this.taskGraph.tasks.length} tasks`);
     } catch (error: any) {
-      console.error('❌ [CLAUDE MA] Planning failed:', error.message);
+      console.error('[CLAUDE MA] Planning failed:', error.message);
 
       // Fallback: single task
       this.taskGraph.tasks = [{
@@ -187,7 +187,7 @@ Create the task plan:`;
   // Step 2: Task Executor Agent
   async executeTask(task: Task): Promise<boolean> {
     this.onEvent('task_start', { taskId: task.id, description: task.description });
-    console.log(`\n🔧 [CLAUDE MA] Executing task: ${task.id}`);
+    console.log(`\n[CLAUDE MA] Executing task: ${task.id}`);
 
     task.status = 'in_progress';
 
@@ -257,7 +257,7 @@ Complete the task now:`;
             };
             toolCalls.push(toolCall);
             this.onEvent('tool', toolCall);
-            console.log(`  🔧 Tool: ${toolCall.tool}`);
+            console.log(`Tool: ${toolCall.tool}`);
           }
         } else if (msg.type === 'result') {
           if (msg.subtype === 'success') {
@@ -270,7 +270,7 @@ Complete the task now:`;
               result: task.result,
             });
 
-            console.log(`✅ [CLAUDE MA] Task ${task.id} completed`);
+            console.log(`[CLAUDE MA] Task ${task.id} completed`);
             return true;
           } else {
             throw new Error(`Task failed: ${msg.subtype}`);
@@ -280,7 +280,7 @@ Complete the task now:`;
 
       return false;
     } catch (error: any) {
-      console.error(`❌ [CLAUDE MA] Task ${task.id} failed:`, error.message);
+      console.error(`[CLAUDE MA] Task ${task.id} failed:`, error.message);
       task.error = error.message;
       task.status = 'failed';
       task.attempts++;
@@ -299,7 +299,7 @@ Complete the task now:`;
     if (!task.result) return false;
 
     this.onEvent('status', { message: `Verifying task ${task.id}...` });
-    console.log(`🔍 [CLAUDE MA] Verifying task: ${task.id}`);
+    console.log(`[CLAUDE MA] Verifying task: ${task.id}`);
 
     task.status = 'verifying';
 
@@ -368,11 +368,11 @@ Return ONLY the JSON object:`;
         feedback: verification.feedback,
       });
 
-      console.log(`${verification.isCorrect ? '✅' : '❌'} [CLAUDE MA] Verification: ${verification.feedback}`);
+      console.log(`${verification.isCorrect ? 'Yep' : 'Nope'} [CLAUDE MA] Verification: ${verification.feedback}`);
 
       return verification.isCorrect;
     } catch (error: any) {
-      console.error('⚠️ [CLAUDE MA] Verification failed:', error.message);
+      console.error('[CLAUDE MA] Verification failed:', error.message);
       return true; // Default to success
     }
   }
@@ -462,7 +462,7 @@ Return ONLY the JSON object:`;
       taskGraph: this.taskGraph,
     });
 
-    console.log(`\n📊 [CLAUDE MA] Execution complete: ${summary.completed}/${summary.total} tasks completed`);
+    console.log(`\n[CLAUDE MA] Execution complete: ${summary.completed}/${summary.total} tasks completed`);
   }
 
   getTaskGraph(): TaskGraph {

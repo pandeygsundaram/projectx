@@ -120,12 +120,12 @@ Fix the error now:`;
             const toolName = fc.name;
             const args = fc.args;
 
-            console.log(`  🔧 [FIX] Calling tool: ${toolName}`);
-            console.log(`     Args: ${JSON.stringify(args, null, 2)}`);
+            console.log(`[FIX] Calling tool: ${toolName}`);
+            console.log(`Args: ${JSON.stringify(args, null, 2)}`);
 
             const toolResult = await executeTool(toolName, args, projectId || '', projectPath || '');
 
-            console.log(`     Result: ${toolResult.substring(0, 100)}...`);
+            console.log(`Result: ${toolResult.substring(0, 100)}...`);
 
             toolCalls.push({
               tool: toolName,
@@ -186,7 +186,7 @@ Fix the error now:`;
     let lastError = '';
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      console.log(`\n  🔧 Fix Attempt ${attempt}/${maxAttempts}`);
+      console.log(`\n  Fix Attempt ${attempt}/${maxAttempts}`);
 
       const result = await this.fixError(
         task,
@@ -202,7 +202,7 @@ Fix the error now:`;
       }
 
       lastError = result.error || 'Unknown error';
-      console.log(`  ❌ Fix attempt ${attempt} failed: ${lastError}`);
+      console.log(`Fix attempt ${attempt} failed: ${lastError}`);
 
       if (attempt < maxAttempts) {
         await new Promise((resolve) => setTimeout(resolve, 1000));

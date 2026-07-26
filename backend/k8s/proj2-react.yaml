@@ -20,18 +20,18 @@ spec:
         command: ["/bin/sh", "-c"]
         args:
           - |
-            echo "📦 Installing git..."
+            echo "Installing git..."
             apk add --no-cache git
             
-            echo "📥 Cloning repo..."
+            echo "Cloning repo..."
             git clone https://github.com/pandeygsundaram/react-templete /app
             
             cd /app
             
-            echo "📦 Installing dependencies..."
+            echo "Installing dependencies..."
             npm install
             
-            echo "🚀 Starting dev server..."
+            echo "Starting dev server..."
             npm run dev -- --host 0.0.0.0 --port 5173
 ---
 apiVersion: v1

@@ -53,7 +53,7 @@ export function createProjectTools(projectId: string) {
         content: [
           {
             type: 'text',
-            text: `✅ Successfully wrote ${args.content.split('\n').length} lines to ${args.path}`,
+            text: `Successfully wrote ${args.content.split('\n').length} lines to ${args.path}`,
           },
         ],
       };
@@ -197,7 +197,7 @@ export function createProjectTools(projectId: string) {
           content: [
             {
               type: 'text',
-              text: `Pod logs (last ${args.seconds} seconds):\n\`\`\`\n${logs}\n\`\`\`\n\n${hasErrors ? '⚠️ ERRORS DETECTED - Please fix these issues!' : '✅ No errors detected'}`,
+              text: `Pod logs (last ${args.seconds} seconds):\n\`\`\`\n${logs}\n\`\`\`\n\n${hasErrors ? 'ERRORS DETECTED - Please fix these issues!' : 'No errors detected'}`,
             },
           ],
           isError: hasErrors,
@@ -225,7 +225,7 @@ export function createProjectTools(projectId: string) {
     },
     async (args) => {
       try {
-        console.log('🏗️  [BUILD TOOL] Running npm run build...');
+        console.log('[BUILD TOOL] Running npm run build...');
         const buildOutput = await executeInPod(projectId, 'cd /app && npm run build 2>&1');
 
         // Check if build was successful
@@ -234,34 +234,34 @@ export function createProjectTools(projectId: string) {
                          buildOutput.includes('ERR!');
 
         if (hasErrors) {
-          console.log('❌ [BUILD TOOL] Build failed with errors');
+          console.log('[BUILD TOOL] Build failed with errors');
           return {
             content: [
               {
                 type: 'text',
-                text: `❌ BUILD FAILED! Please fix these errors:\n\`\`\`\n${buildOutput}\n\`\`\``,
+                text: `BUILD FAILED! Please fix these errors:\n\`\`\`\n${buildOutput}\n\`\`\``,
               },
             ],
             isError: true,
           };
         } else {
-          console.log('✅ [BUILD TOOL] Build successful');
+          console.log('[BUILD TOOL] Build successful');
           return {
             content: [
               {
                 type: 'text',
-                text: `✅ BUILD SUCCESSFUL!\n\`\`\`\n${buildOutput}\n\`\`\``,
+                text: `BUILD SUCCESSFUL!\n\`\`\`\n${buildOutput}\n\`\`\``,
               },
             ],
           };
         }
       } catch (error: any) {
-        console.error('❌ [BUILD TOOL] Build command failed:', error);
+        console.error('[BUILD TOOL] Build command failed:', error);
         return {
           content: [
             {
               type: 'text',
-              text: `❌ BUILD COMMAND FAILED: ${error.message}`,
+              text: `BUILD COMMAND FAILED: ${error.message}`,
             },
           ],
           isError: true,

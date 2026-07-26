@@ -8,9 +8,9 @@ if (!process.env.R2_ENDPOINT) {
   throw new Error('R2_ENDPOINT is not configured in environment variables');
 }
 
-console.log(`🔧 Configuring R2 client with endpoint: ${process.env.R2_ENDPOINT}`);
-console.log(`🔧 R2 Access Key: ${process.env.R2_ACCESS_KEY_ID?.substring(0, 8)}...`);
-console.log(`🔧 R2 Bucket: ${process.env.R2_BUCKET_NAME}`);
+console.log(`Configuring R2 client with endpoint: ${process.env.R2_ENDPOINT}`);
+console.log(`R2 Access Key: ${process.env.R2_ACCESS_KEY_ID?.substring(0, 8)}...`);
+console.log(`R2 Bucket: ${process.env.R2_BUCKET_NAME}`);
 
 const r2Client = new S3Client({
   region: 'auto',
@@ -60,7 +60,7 @@ export async function uploadToR2(
 
     await r2Client.send(command);
 
-    console.log(`✅ Uploaded to R2: ${BUCKET_NAME}/${uniqueKey}`);
+    console.log(`Uploaded to R2: ${BUCKET_NAME}/${uniqueKey}`);
 
     return {
       key: uniqueKey
@@ -169,7 +169,7 @@ export function validateR2Config(): boolean {
 
   for (const key of required) {
     if (!process.env[key]) {
-      console.warn(`⚠️  Missing R2 configuration: ${key}`);
+      console.warn(`Missing R2 configuration: ${key}`);
       return false;
     }
   }
@@ -199,7 +199,7 @@ export async function uploadDeployment(
   files: DeploymentFile[]
 ): Promise<DeploymentResult> {
   try {
-    console.log(`🚀 Uploading deployment for project ${projectId} (${files.length} files)...`);
+    console.log(`Uploading deployment for project ${projectId} (${files.length} files)...`);
 
     // Upload to deployments/{projectId}/dist/ to preserve build structure
     const deploymentFolder = `deployments/${projectId}/dist`;
@@ -220,12 +220,12 @@ export async function uploadDeployment(
       });
 
       await r2Client.send(command);
-      console.log(`  ✅ Uploaded: ${file.path}`);
+      console.log(`Uploaded: ${file.path}`);
     });
 
     await Promise.all(uploadPromises);
 
-    console.log(`✅ Deployment complete for ${projectId}`);
+    console.log(`Deployment complete for ${projectId}`);
 
     // Return the deployment URL
     const deploymentUrl = getDeploymentUrl(projectId);
@@ -259,7 +259,7 @@ export async function deleteDeployment(projectId: string): Promise<void> {
     // 1. List all objects with prefix `deployments/${projectId}/`
     // 2. Delete them in batches
     // For now, we'll just log this operation
-    console.log(`🗑️  Deployment deletion for ${projectId} would happen here`);
+    console.log(`Deployment deletion for ${projectId} would happen here`);
 
     // TODO: Implement batch deletion using ListObjectsV2 and DeleteObjects commands
   } catch (error: any) {

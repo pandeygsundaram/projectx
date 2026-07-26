@@ -105,13 +105,13 @@ Execute the task now:`;
             const toolName = fc.name;
             const args = fc.args;
 
-            console.log(`  🔧 Calling tool: ${toolName}`);
-            console.log(`     Args: ${JSON.stringify(args, null, 2)}`);
+            console.log(`Calling tool: ${toolName}`);
+            console.log(`Args: ${JSON.stringify(args, null, 2)}`);
 
             // Execute the tool
             const toolResult = await executeTool(toolName, args, projectId || '', projectPath || '');
 
-            console.log(`     Result: ${toolResult.substring(0, 100)}...`);
+            console.log(`Result: ${toolResult.substring(0, 100)}...`);
 
             toolCalls.push({
               tool: toolName,
@@ -182,7 +182,7 @@ Execute the task now:`;
       }
 
       lastError = result.error || 'Unknown error';
-      console.log(`  ❌ Attempt ${attempt} failed: ${lastError}`);
+      console.log(`Attempt ${attempt} failed: ${lastError}`);
 
       // Wait before retry
       if (attempt < maxRetries) {

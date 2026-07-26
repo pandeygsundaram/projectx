@@ -49,4 +49,3 @@ spec:
     targetPort: 443
 
 
-# here is the deployment file for samosa maxi
